@@ -54,6 +54,7 @@ function renderSpeedConfigStep() {
   return `
     <form class="speed-card speed-config-card" id="speed-form">
       <h2 class="speed-gradient-title">一键加速域名配置</h2>
+      <p>沿用当前域名区域的 SSL/TLS 模式。部署失败时会尝试恢复本次修改，并提示恢复结果。</p>
       <div class="speed-form-stack">
         <label class="speed-field" for="accessDomain">
           <span>访问域名</span>
@@ -124,6 +125,10 @@ function renderSpeedConfigStep() {
 function renderSummaryRows(form) {
   return `
     <div class="speed-summary-row">
+      <span>SSL/TLS：</span>
+      <strong>保持当前区域设置</strong>
+    </div>
+    <div class="speed-summary-row">
       <span>访问域名：</span>
       <strong>${escapeHtml(form.accessDomain || "-")}</strong>
     </div>
@@ -185,7 +190,7 @@ function renderSpeedCompleteStep() {
     <section class="speed-card speed-complete-card">
       <div class="speed-success-icon">${icon("check")}</div>
       <h2>部署成功！</h2>
-      <p>您的网站加速已成功部署，约10-30秒生效</p>
+      <p>加速配置已提交，请等待 DNS 解析和证书验证完成后检查访问。</p>
 
       <div class="speed-success-summary">
         <div class="speed-success-row">
@@ -195,8 +200,8 @@ function renderSpeedCompleteStep() {
           </a>
         </div>
         <div class="speed-success-row">
-          <span>Worker 状态：</span>
-          <strong>运行中</strong>
+          <span>SSL/TLS：</span>
+          <strong>保持当前区域设置</strong>
         </div>
       </div>
 

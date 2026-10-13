@@ -7,9 +7,16 @@ export class SpeedDeployController {
 
   deploy = async ({ request, params }) => {
     const body = await readJsonBody(request);
-    const deployment = await this.speedDeployService.deploy(params.zoneId, body);
-
-    return { statusCode: 200, body: { deployment } };
+    try {
+      const deployment = await this.speedDeployService.deploy(params.zoneId, body);
+      return { statusCode: 200, body: { deployment } };
+    } catch (error) {
+      if (!error.rollback) throw error;
+      return {
+        statusCode: error.statusCode || 502,
+        body: { error: error.message, rollback: error.rollback },
+      };
+    }
   };
 
   list = async ({ params }) => {

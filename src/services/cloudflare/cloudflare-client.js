@@ -306,12 +306,15 @@ export class CloudflareClient {
 
       return await this.fetchImpl(url, requestOptions);
     } catch (cause) {
-      throw new HttpError(
+      const error = new HttpError(
         cause.name === "AbortError" ? 504 : 502,
         cause.name === "AbortError"
           ? "Cloudflare API 请求超时，请稍后重试。"
           : "无法连接 Cloudflare API，请检查网络或 API 地址。"
       );
+      // A transport failure cannot prove that a remote write was rejected.
+      error.remoteOutcomeUnknown = !["GET", "HEAD"].includes(method);
+      throw error;
     } finally {
       clearTimeout(timeout);
     }

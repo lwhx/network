@@ -10,9 +10,11 @@
 - 域名管理：读取当前账号所有 Zone，展示域名、状态、区域 ID、套餐，并支持新增 Zone。
 - DNS 记录：读取、新增、编辑、删除和批量管理常用 DNS 记录，支持按类型、域名和内容/IP 模糊搜索。
 - 单域名管理：提供 DNS、SSL/TLS、缓存、防火墙、统计分析、页面规则、证书管理页面。
-- 一键加速：配置访问域名、源站域名、优选域名和 Cloudflare for SaaS 相关流程。
+- 一键加速：配置访问域名、源站域名、优选域名和 Cloudflare for SaaS 相关流程；保留当前 Zone SSL/TLS 模式，写入前检查冲突，失败时逆序恢复本次修改并报告恢复结果。
 - Workers 与开发资源：管理 Workers、Pages、D1、R2、KV、Cloudflare Tunnels 和 Worker 模板库。
 - 操作历史：记录管理操作结果，不记录请求体、密码、2FA 密钥或 Global API Key。
+
+一键加速的恢复范围、冲突处理和限制见 [部署文档](./DEPLOYMENT.md#一键加速的变更与恢复)；本轮开发与验证记录见 [安全变更说明](./docs/speed-deploy-safety.md)。
 
 ## 界面预览
 
