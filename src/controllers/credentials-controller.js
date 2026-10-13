@@ -42,6 +42,7 @@ export class CredentialsController {
         accounts,
         activeCloudflareAccount,
         authenticated,
+        totpEnabled: this.panelAuthService.isTwoFactorEnabled(),
         csrfToken: sessionCredentials?.csrfToken || "",
         email: authenticated ? activeCloudflareAccount?.email || "" : "",
         expiresAt: sessionCredentials?.expiresAt || "",
@@ -123,6 +124,7 @@ export class CredentialsController {
       password: body.password || "",
       totpCode: body.totpCode || body.auth || body.authCode || "",
       totpSecret: body.totpSecret || "",
+      totpEnabled: body.totpEnabled,
       username: body.username || body.user || "",
     });
 
@@ -139,6 +141,7 @@ export class CredentialsController {
     const session = this.credentialSessionService.create({
       activeCloudflareAccountId: selectedAccountId,
       authenticated: true,
+      authRevision: result.user.authRevision,
       source: "panel",
     });
     const activeCloudflareAccount = this.cloudflareAccountService.getSafeAccount(selectedAccountId);
@@ -182,6 +185,7 @@ export class CredentialsController {
       password: body.password || "",
       totpCode: body.totpCode || body.auth || body.authCode || "",
       totpSecret: body.totpSecret || "",
+      totpEnabled: body.totpEnabled,
       username: body.username || body.user || "",
     });
 
@@ -196,6 +200,7 @@ export class CredentialsController {
     this.resetRateLimit(request, "setup");
     const session = this.credentialSessionService.create({
       authenticated: true,
+      authRevision: result.user.authRevision,
       source: "panel",
     });
 
@@ -335,11 +340,12 @@ export class CredentialsController {
       };
     }
 
-    if (!user || !password || !auth) {
+    const totpEnabled = this.panelAuthService.isTwoFactorEnabled();
+    if (!user || !password || (totpEnabled && !auth)) {
       return {
         statusCode: 400,
         body: {
-          error: "请输入用户名、密码和 2FA 验证码。",
+          error: totpEnabled ? "请输入用户名、密码和 2FA 验证码。" : "请输入用户名和密码。",
         },
       };
     }
@@ -350,7 +356,8 @@ export class CredentialsController {
       return rateLimit.response;
     }
 
-    if (!this.panelAuthService.verify({ auth, password, user })) {
+    const verification = this.panelAuthService.authenticate({ auth, password, user });
+    if (!verification) {
       return {
         statusCode: 401,
         body: {
@@ -365,6 +372,8 @@ export class CredentialsController {
         const session = this.credentialSessionService.create({
           authenticated: true,
           source: "panel",
+          remember: body.remember !== false,
+          authRevision: verification.authRevision,
         });
 
         return {
@@ -402,6 +411,8 @@ export class CredentialsController {
       activeCloudflareAccountId: selectedAccountId,
       authenticated: true,
       source: "panel",
+      remember: body.remember !== false,
+      authRevision: verification.authRevision,
     });
     const activeCloudflareAccount = this.cloudflareAccountService.getSafeAccount(selectedAccountId);
 

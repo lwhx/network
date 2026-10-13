@@ -4,8 +4,9 @@
 
 ## 功能
 
-- 首次初始化：第一次打开 `ip:端口` 时必须输入容器启动日志中的一次性初始化口令，再创建管理员账户并强制绑定 2FA。
-- SQLite 持久化：管理员密码使用 scrypt 哈希保存；2FA 密钥和 Cloudflare Global API Key 使用 AES-GCM 加密后保存到 SQLite。
+- 首次初始化：第一次打开 `ip:端口` 时必须输入容器启动日志中的一次性初始化口令，再创建管理员账户；验证器（2FA）按需启用。
+- 简化登录：默认账号密码登录，可选验证器；登录设置中可开启或关闭 2FA。
+- SQLite 持久化：管理员密码使用 scrypt 哈希保存；启用的 2FA 密钥和 Cloudflare Global API Key 加密保存；记住登录的会话跨容器重启有效。
 - 多账户管理：Cloudflare 账号保存在 SQLite，登录后可在顶部切换。
 - 域名管理：读取当前账号所有 Zone，展示域名、状态、区域 ID、套餐，并支持新增 Zone。
 - DNS 记录：读取、新增、编辑、删除和批量管理常用 DNS 记录，支持按类型、域名和内容/IP 模糊搜索。
@@ -56,8 +57,8 @@ http://服务器IP:3000
 首次打开会进入两页初始化流程：
 
 1. 查看容器日志中的 `Initial setup token` 提示。默认不会输出完整口令，需要进入容器读取 `/data/setup-token.txt`。
-2. 在第 1 页输入初始化口令，生成并保存 2FA 登录密钥到身份验证器。
-3. 创建管理员用户名和密码，输入当前 6 位 2FA 验证码确认绑定。
+2. 在第 1 页输入初始化口令，设置管理员用户名和密码，默认无需绑定验证器。
+3. 如果需要额外验证，可勾选“现在绑定验证器”；也可以进入后台后在“登录设置”中开启。
 4. 在第 2 页录入一个或多个 Cloudflare 账号名称、登录邮箱和 Global API Key。
 5. 保存后进入管理面板，后续可在顶部切换当前 Cloudflare 账号。
 
@@ -96,6 +97,8 @@ docker run -d \
   -v cloudflare-panel-data:/data \
   baize233/network:latest
 ```
+
+默认密码登录、旧账号关闭 2FA、会话迁移与升级说明见 [简化登录说明](./docs/simple-login.md)。
 
 ## 常用教程
 
@@ -262,7 +265,7 @@ node --test test/**/*.test.js
 
 ## 安全说明
 
-浏览器只保存最长 30 天的 HttpOnly 随机会话 Cookie。所有状态修改接口要求 CSRF token；静态页和 JSON 响应带 CSP、`X-Frame-Options`、`nosniff` 等安全头。Cookie、localStorage、sessionStorage、接口响应和操作历史都不保存 Cloudflare Global API Key、管理员密码或 2FA 密钥。
+登录默认勾选“记住登录”，浏览器保存最长 30 天的 HttpOnly 随机会话 Cookie，容器重启后继续有效；取消勾选则只用于本次浏览器会话，容器重启后需重新登录。SQLite 仅保存会话标识的 SHA-256 哈希和必要状态，不保存原始会话标识。退出登录、变更 2FA 和重置管理员会撤销旧会话。所有状态修改接口要求 CSRF token；静态页和 JSON 响应带 CSP、`X-Frame-Options`、`nosniff` 等安全头。Cookie、localStorage、sessionStorage、接口响应和操作历史都不保存 Cloudflare Global API Key、管理员密码或 2FA 密钥。
 
 `/data/secret.key` 是 SQLite 敏感字段加密密钥，泄露等级等同敏感凭据。生产环境建议用 `PANEL_SECRET_KEY_FILE` 从 Docker secret 或独立只读挂载提供密钥材料，让密钥和 `/data/panel.sqlite` 分开存放；只泄露 SQLite 文件时无法直接读出 2FA seed 或 Cloudflare Global API Key。
 

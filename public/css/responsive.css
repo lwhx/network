@@ -235,3 +235,35 @@
     justify-content: start;
   }
 }
+
+@media (max-width: 600px) {
+  .topbar {
+    height: auto;
+    min-height: 98px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 14px 16px;
+  }
+
+  .topbar-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .topbar-actions button {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .account-tools {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .account-switcher {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+  }
+}

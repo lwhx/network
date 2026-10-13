@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { HttpError } from "../lib/http-error.js";
 
 const defaultCookieName = "cf_panel_session";
 const secondsPerDay = 24 * 60 * 60;
@@ -33,15 +34,14 @@ function parseCookies(cookieHeader = "") {
   return cookies;
 }
 
-function cookieParts({ cookieName, value, maxAgeSeconds, expiresAt, secure }) {
+function cookieParts({ cookieName, value, maxAgeSeconds, expiresAt, secure, remember = true }) {
   const parts = [
     `${cookieName}=${value}`,
     "Path=/",
-    `Max-Age=${maxAgeSeconds}`,
-    `Expires=${expiresAt}`,
     "HttpOnly",
     "SameSite=Lax",
   ];
+  if (remember) parts.push(`Max-Age=${maxAgeSeconds}`, `Expires=${expiresAt}`);
 
   if (secure) {
     parts.push("Secure");
@@ -70,6 +70,7 @@ export class CredentialSessionService {
     secureCookies = false,
     ttlDays = defaultTtlDays,
     trustProxyHeaders = false,
+    store = null,
   } = {}) {
     this.cookieName = cookieName;
     this.maxAgeDays = normalizeTtlDays(ttlDays);
@@ -78,10 +79,11 @@ export class CredentialSessionService {
     this.publicOriginIsHttps = isHttpsOrigin(publicOrigin);
     this.secureCookies = Boolean(secureCookies);
     this.sessions = new Map();
+    this.store = store;
     this.trustProxyHeaders = Boolean(trustProxyHeaders);
   }
 
-  create({ activeCloudflareAccountId = "", authenticated = false, email = "", globalApiKey = "", source = "browser" }) {
+  create({ activeCloudflareAccountId = "", authenticated = false, email = "", globalApiKey = "", source = "browser", remember = true, authRevision }) {
     this.pruneExpired();
 
     const id = randomBytes(32).toString("base64url");
@@ -90,6 +92,8 @@ export class CredentialSessionService {
     const session = {
       activeCloudflareAccountId,
       authenticated: Boolean(authenticated),
+      authRevision: authRevision ?? this.store?.getAuthRevision() ?? "",
+      remember: remember !== false,
       createdAt: new Date(createdAtMs).toISOString(),
       csrfToken: randomBytes(32).toString("base64url"),
       email,
@@ -100,7 +104,12 @@ export class CredentialSessionService {
       source,
     };
 
-    this.sessions.set(id, session);
+    if (this.store && session.authenticated && session.authRevision !== this.store.getAuthRevision()) {
+      throw new HttpError(401, "账户登录设置已更新，请重新登录。");
+    }
+    if (this.store && session.authenticated && session.remember) {
+      if (!this.store.createSession(session)) throw new HttpError(401, "账户登录设置已更新，请重新登录。");
+    } else this.sessions.set(id, session);
     return session;
   }
 
@@ -111,14 +120,15 @@ export class CredentialSessionService {
       return null;
     }
 
-    const session = this.sessions.get(sessionId);
+    const session = this.store?.getSession(sessionId, this.now()) || this.sessions.get(sessionId);
 
     if (!session) {
       return null;
     }
 
-    if (session.expiresAtMs <= this.now()) {
+    if (session.expiresAtMs <= this.now() || (this.store && session.authRevision !== this.store.getAuthRevision())) {
       this.sessions.delete(sessionId);
+      this.store?.deleteSession(sessionId);
       return null;
     }
 
@@ -135,6 +145,7 @@ export class CredentialSessionService {
     return {
       activeCloudflareAccountId: session.activeCloudflareAccountId || "",
       authenticated: Boolean(session.authenticated),
+      remember: session.remember,
       csrfToken: session.csrfToken || "",
       email: session.email,
       expiresAt: session.expiresAt,
@@ -149,6 +160,7 @@ export class CredentialSessionService {
 
     if (sessionId) {
       this.sessions.delete(sessionId);
+      this.store?.deleteSession(sessionId);
     }
 
     return Boolean(sessionId);
@@ -172,6 +184,7 @@ export class CredentialSessionService {
     if (!session.csrfToken) {
       session.csrfToken = randomBytes(32).toString("base64url");
     }
+    if (this.store && session.authenticated && session.remember && !this.store.updateSession(session, this.now())) return null;
 
     return session;
   }
@@ -197,6 +210,7 @@ export class CredentialSessionService {
       maxAgeSeconds: this.maxAgeSeconds,
       secure: this.shouldUseSecureCookie(request),
       value: session.id,
+      remember: session.remember,
     }).join("; ");
   }
 
@@ -236,6 +250,7 @@ export class CredentialSessionService {
 
   pruneExpired() {
     const now = this.now();
+    this.store?.pruneSessions(now);
 
     for (const [id, session] of this.sessions) {
       if (session.expiresAtMs <= now) {

@@ -1,4 +1,10 @@
 export function bindEvents(actions) {
+  document.querySelector("#setup-use-2fa")?.addEventListener("change", actions.toggleSetupTwoFactor);
+  document.querySelector("#login-settings-open")?.addEventListener("click", actions.openLoginSettings);
+  document.querySelector("#login-settings-2fa")?.addEventListener("change", actions.toggleLoginSettings);
+  document.querySelector("#login-settings-secret")?.addEventListener("click", actions.generateLoginSettingsSecret);
+  document.querySelector("#login-settings-form")?.addEventListener("submit", actions.saveLoginSettings);
+  document.querySelectorAll(".login-settings-close").forEach((button) => button.addEventListener("click", actions.closeLoginSettings));
   document
     .querySelector("#cloudflare-connect-form")
     ?.addEventListener("submit", actions.connectSession);

@@ -18,6 +18,14 @@ export const state = {
   csrfToken: "",
   sessionError: "",
   loginRequired: false,
+  totpEnabled: false,
+  rememberLogin: true,
+  setupUseTwoFactor: false,
+  loginSettingsOpen: false,
+  loginSettingsBusy: false,
+  loginSettingsEnabled: false,
+  loginSettingsSecret: "",
+  loginSettingsError: "",
   setupRequired: false,
   setupLoadingSecret: false,
   setupLoginSubmitting: false,
@@ -28,8 +36,6 @@ export const state = {
   setupStep: "admin",
   setupCloudflareAccounts: [
     { cloudflareName: "主账号", cfEmail: "", cfApiKey: "" },
-    { cloudflareName: "备用账号", cfEmail: "", cfApiKey: "" },
-    { cloudflareName: "第三账号", cfEmail: "", cfApiKey: "" },
   ],
   cloudflareAccounts: [],
   cloudflareAccountDialogOpen: false,
@@ -198,6 +204,14 @@ export function resetSessionState() {
   state.sessionEmail = "";
   state.sessionHasServerCredentials = false;
   state.loginRequired = false;
+  state.totpEnabled = false;
+  state.rememberLogin = true;
+  state.setupUseTwoFactor = false;
+  state.loginSettingsOpen = false;
+  state.loginSettingsBusy = false;
+  state.loginSettingsEnabled = false;
+  state.loginSettingsSecret = "";
+  state.loginSettingsError = "";
   state.setupRequired = false;
   state.setupLoadingSecret = false;
   state.setupLoginSubmitting = false;
@@ -208,8 +222,6 @@ export function resetSessionState() {
   state.setupStep = "admin";
   state.setupCloudflareAccounts = [
     { cloudflareName: "主账号", cfEmail: "", cfApiKey: "" },
-    { cloudflareName: "备用账号", cfEmail: "", cfApiKey: "" },
-    { cloudflareName: "第三账号", cfEmail: "", cfApiKey: "" },
   ];
   state.cloudflareAccounts = [];
   state.cloudflareAccountDialogOpen = false;
