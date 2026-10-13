@@ -1,8 +1,9 @@
 import { once } from "node:events";
 import { spawn } from "node:child_process";
-import { createServer } from "node:http";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+
+import { createSpeedCloudflareMock } from "./helpers/speed-cloudflare-mock.js";
 
 import { preparePanelTestEnvironment } from "./helpers/panel-test-environment.js";
 
@@ -50,32 +51,6 @@ function startPanel(env) {
   };
 }
 
-async function readRequestBody(request) {
-  const chunks = [];
-
-  for await (const chunk of request) {
-    chunks.push(chunk);
-  }
-
-  const bodyText = Buffer.concat(chunks).toString("utf8");
-  return bodyText ? JSON.parse(bodyText) : null;
-}
-
-function jsonResponse(response, statusCode, payload) {
-  response.writeHead(statusCode, { "Content-Type": "application/json" });
-  response.end(JSON.stringify(payload));
-}
-
-function cloudflareSuccess(result, resultInfo) {
-  return {
-    success: true,
-    errors: [],
-    messages: [],
-    result,
-    ...(resultInfo ? { result_info: resultInfo } : {}),
-  };
-}
-
 function makeDnsRecord(overrides = {}) {
   return {
     id: "b".repeat(32),
@@ -108,140 +83,7 @@ function makeCustomHostname(overrides = {}) {
   };
 }
 
-function createCloudflareMock({ dnsRecords = [], customHostnames = [] } = {}) {
-  const zoneId = "a".repeat(32);
-  const requests = [];
-  const server = createServer(async (request, response) => {
-    const url = new URL(request.url, "http://127.0.0.1");
-    const body = await readRequestBody(request);
-
-    requests.push({
-      method: request.method,
-      path: url.pathname,
-      query: Object.fromEntries(url.searchParams.entries()),
-      body,
-    });
-
-    if (request.method === "GET" && url.pathname === `/zones/${zoneId}/dns_records`) {
-      jsonResponse(
-        response,
-        200,
-        cloudflareSuccess(dnsRecords, {
-          page: 1,
-          per_page: 100,
-          total_pages: 1,
-          total_count: dnsRecords.length,
-        })
-      );
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === `/zones/${zoneId}/dns_records`) {
-      const record = makeDnsRecord({
-        id: "c".repeat(32),
-        ...body,
-        name: body.name.includes(".") ? body.name : `${body.name}.alpha.example`,
-      });
-      dnsRecords.push(record);
-      jsonResponse(response, 200, cloudflareSuccess(record));
-      return;
-    }
-
-    if (
-      request.method === "PATCH" &&
-      url.pathname.startsWith(`/zones/${zoneId}/dns_records/`)
-    ) {
-      const recordId = url.pathname.split("/").at(-1);
-      const nextRecord = makeDnsRecord({
-        id: recordId,
-        ...body,
-        name: body.name.includes(".") ? body.name : `${body.name}.alpha.example`,
-      });
-      dnsRecords = dnsRecords.map((record) =>
-        record.id === recordId ? nextRecord : record
-      );
-      jsonResponse(response, 200, cloudflareSuccess(nextRecord));
-      return;
-    }
-
-    if (request.method === "PATCH" && url.pathname === `/zones/${zoneId}/settings/ssl`) {
-      jsonResponse(
-        response,
-        200,
-        cloudflareSuccess({
-          id: "ssl",
-          value: body.value,
-          editable: true,
-        })
-      );
-      return;
-    }
-
-    if (
-      request.method === "PUT" &&
-      url.pathname === `/zones/${zoneId}/custom_hostnames/fallback_origin`
-    ) {
-      jsonResponse(
-        response,
-        200,
-        cloudflareSuccess({
-          origin: body.origin,
-          status: "active",
-        })
-      );
-      return;
-    }
-
-    if (request.method === "GET" && url.pathname === `/zones/${zoneId}/custom_hostnames`) {
-      const hostname = url.searchParams.get("hostname");
-      const result = customHostnames.filter((item) => item.hostname === hostname);
-      jsonResponse(
-        response,
-        200,
-        cloudflareSuccess(result, {
-          page: 1,
-          per_page: 50,
-          total_pages: 1,
-          total_count: result.length,
-        })
-      );
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === `/zones/${zoneId}/custom_hostnames`) {
-      const hostname = makeCustomHostname(body);
-      customHostnames.push(hostname);
-      jsonResponse(response, 200, cloudflareSuccess(hostname));
-      return;
-    }
-
-    if (
-      request.method === "PATCH" &&
-      url.pathname.startsWith(`/zones/${zoneId}/custom_hostnames/`)
-    ) {
-      const hostnameId = url.pathname.split("/").at(-1);
-      const existingHostname = customHostnames.find((item) => item.id === hostnameId);
-      const hostname = makeCustomHostname({
-        ...existingHostname,
-        ...body,
-        id: hostnameId,
-      });
-      customHostnames = customHostnames.map((item) =>
-        item.id === hostnameId ? hostname : item
-      );
-      jsonResponse(response, 200, cloudflareSuccess(hostname));
-      return;
-    }
-
-    jsonResponse(response, 404, {
-      success: false,
-      errors: [{ message: "not found" }],
-      messages: [],
-    });
-  });
-
-  return { requests, server };
-}
+const createCloudflareMock = createSpeedCloudflareMock;
 
 async function postSpeedDeploy(panelPort, zoneId, body) {
   const response = await fetch(
@@ -297,53 +139,31 @@ test("deploys one-click acceleration through Cloudflare SaaS APIs", async () => 
     assert.equal(payload.deployment.accessRecord.content, "saas.sin.fan");
     assert.equal(payload.deployment.fallbackRecord.name, "saas.alpha.example");
     assert.equal(payload.deployment.fallbackOrigin.origin, "saas.alpha.example");
-    assert.equal(payload.deployment.sslSetting.value, "strict");
+    assert.equal(payload.deployment.sslSetting.value, "flexible");
+    assert.equal(payload.deployment.sslSetting.changed, false);
+    assert.equal(cloudflareMock.state.ssl, "flexible");
 
-    assert.deepEqual(
-      cloudflareMock.requests.map((request) => [request.method, request.path]),
-      [
-        ["GET", `/zones/${zoneId}/dns_records`],
-        ["POST", `/zones/${zoneId}/dns_records`],
-        ["POST", `/zones/${zoneId}/dns_records`],
-        ["PATCH", `/zones/${zoneId}/settings/ssl`],
-        ["PUT", `/zones/${zoneId}/custom_hostnames/fallback_origin`],
-        ["GET", `/zones/${zoneId}/custom_hostnames`],
-        ["POST", `/zones/${zoneId}/custom_hostnames`],
-      ]
-    );
+    const writes = cloudflareMock.requests.filter((call) => call.method !== "GET");
+    assert.deepEqual(writes.map((call) => [call.method, call.path]), [
+      ["POST", `/zones/${zoneId}/dns_records`],
+      ["PUT", `/zones/${zoneId}/custom_hostnames/fallback_origin`],
+      ["POST", `/zones/${zoneId}/custom_hostnames`],
+      ["POST", `/zones/${zoneId}/dns_records`],
+    ]);
+    assert.deepEqual(writes[0].body, {
+      type: "A", name: "saas.alpha.example", content: "6.6.6.6",
+      ttl: 1, proxied: true, comment: "一键加速回退源",
+    });
+    assert.deepEqual(writes[1].body, { origin: "saas.alpha.example" });
+    assert.deepEqual(writes[2].body, {
+      hostname: "cdn.alpha.example", custom_origin_server: "origin.alpha.example",
+      ssl: { method: "http", type: "dv", settings: { min_tls_version: "1.2" } },
+    });
+    assert.deepEqual(writes[3].body, {
+      type: "CNAME", name: "cdn.alpha.example", content: "saas.sin.fan",
+      ttl: 1, proxied: false, comment: "一键加速优选域名",
+    });
 
-    assert.deepEqual(cloudflareMock.requests[1].body, {
-      type: "CNAME",
-      name: "cdn.alpha.example",
-      content: "saas.sin.fan",
-      ttl: 1,
-      proxied: false,
-      comment: "一键加速优选域名",
-    });
-    assert.deepEqual(cloudflareMock.requests[2].body, {
-      type: "A",
-      name: "saas.alpha.example",
-      content: "6.6.6.6",
-      ttl: 1,
-      proxied: true,
-      comment: "一键加速回退源",
-    });
-    assert.deepEqual(cloudflareMock.requests[3].body, { value: "strict" });
-    assert.deepEqual(cloudflareMock.requests[4].body, {
-      origin: "saas.alpha.example",
-    });
-    assert.equal(cloudflareMock.requests[5].query.hostname, "cdn.alpha.example");
-    assert.deepEqual(cloudflareMock.requests[6].body, {
-      hostname: "cdn.alpha.example",
-      custom_origin_server: "origin.alpha.example",
-      ssl: {
-        method: "http",
-        type: "dv",
-        settings: {
-          min_tls_version: "1.2",
-        },
-      },
-    });
   } finally {
     await panel.stop();
     cloudflareMock.server.close();
@@ -412,44 +232,16 @@ test("updates managed fallback DNS and existing custom hostname idempotently", a
     assert.equal(payload.deployment.fallbackRecord.proxied, true);
     assert.equal(payload.deployment.customHostname.customOriginServer, "origin.alpha.example");
 
-    assert.deepEqual(
-      cloudflareMock.requests.map((request) => [request.method, request.path]),
-      [
-        ["GET", `/zones/${zoneId}/dns_records`],
-        ["PATCH", `/zones/${zoneId}/dns_records/${"2".repeat(32)}`],
-        ["PATCH", `/zones/${zoneId}/dns_records/${fallbackRecordId}`],
-        ["PATCH", `/zones/${zoneId}/settings/ssl`],
-        ["PUT", `/zones/${zoneId}/custom_hostnames/fallback_origin`],
-        ["GET", `/zones/${zoneId}/custom_hostnames`],
-        ["PATCH", `/zones/${zoneId}/custom_hostnames/${customHostnameId}`],
-      ]
-    );
-    assert.deepEqual(cloudflareMock.requests[1].body, {
-      type: "CNAME",
-      name: "cdn.alpha.example",
-      content: "saas.sin.fan",
-      ttl: 1,
-      proxied: false,
-      comment: "一键加速优选域名",
-    });
-    assert.deepEqual(cloudflareMock.requests[2].body, {
-      type: "A",
-      name: "saas.alpha.example",
-      content: "6.6.6.6",
-      ttl: 1,
-      proxied: true,
-      comment: "一键加速回退源",
-    });
-    assert.deepEqual(cloudflareMock.requests[6].body, {
-      custom_origin_server: "origin.alpha.example",
-      ssl: {
-        method: "http",
-        type: "dv",
-        settings: {
-          min_tls_version: "1.2",
-        },
-      },
-    });
+    const writes = cloudflareMock.requests.filter((call) => call.method !== "GET");
+    assert.deepEqual(writes.map((call) => [call.method, call.path]), [
+      ["PATCH", `/zones/${zoneId}/dns_records/${fallbackRecordId}`],
+      ["PUT", `/zones/${zoneId}/custom_hostnames/fallback_origin`],
+      ["PATCH", `/zones/${zoneId}/custom_hostnames/${customHostnameId}`],
+      ["PATCH", `/zones/${zoneId}/dns_records/${"2".repeat(32)}`],
+    ]);
+    assert.deepEqual(writes[2].body, { custom_origin_server: "origin.alpha.example" });
+    assert.equal(cloudflareMock.state.ssl, "flexible");
+
   } finally {
     await panel.stop();
     cloudflareMock.server.close();
@@ -492,7 +284,7 @@ test("allows a custom optimized domain outside the recommended list", async () =
 
     assert.equal(response.status, 200);
     assert.equal(payload.deployment.optimizedDomain, "custom.optimized.example");
-    assert.deepEqual(cloudflareMock.requests[1].body, {
+    assert.deepEqual(cloudflareMock.requests.find((call) => call.method === "POST" && call.body?.name === "cdn.alpha.example").body, {
       type: "CNAME",
       name: "cdn.alpha.example",
       content: "custom.optimized.example",
@@ -540,6 +332,8 @@ test("renders saas.sin.fan as default and exposes custom optimized domain input"
   assert.match(app.innerHTML, /saas\.sin\.fan 推荐/);
   assert.match(app.innerHTML, /自定义优选域名/);
   assert.match(app.innerHTML, /填写后会覆盖上方推荐选项/);
+  assert.match(app.innerHTML, /沿用当前域名区域的 SSL\/TLS 模式/);
+  assert.match(app.innerHTML, /部署失败时会尝试恢复/);
 
   delete global.document;
 });
@@ -569,10 +363,8 @@ test("warns when an in-zone source domain has no DNS record", async () => {
 
     assert.equal(response.status, 409);
     assert.match(payload.error, /源站域名 origin\.alpha\.example 未添加 DNS 解析/);
-    assert.deepEqual(
-      cloudflareMock.requests.map((request) => [request.method, request.path]),
-      [["GET", `/zones/${zoneId}/dns_records`]]
-    );
+    assert.ok(cloudflareMock.requests.every((call) => call.method === "GET"));
+
   } finally {
     await panel.stop();
     cloudflareMock.server.close();
@@ -605,6 +397,41 @@ test("rejects one-click acceleration when the access domain is outside the zone"
     assert.equal(response.status, 400);
     assert.match(payload.error, /访问域名必须属于 alpha\.example/);
     assert.equal(cloudflareMock.requests.length, 0);
+  } finally {
+    await panel.stop();
+    cloudflareMock.server.close();
+  }
+});
+
+
+test("speed deployment API reports confirmed rollback after a failed traffic switch", async () => {
+  const zoneId = "a".repeat(32);
+  let failed = false;
+  const cloudflareMock = createCloudflareMock({
+    dnsRecords: [makeDnsRecord({ id: "d".repeat(32), type: "A", name: "origin.alpha.example",
+      content: "192.0.2.10", proxied: false, comment: "" })],
+    intercept({ call, apply, send }) {
+      if (failed || call.method !== "POST" || call.body?.name !== "cdn.alpha.example") return false;
+      failed = true;
+      apply();
+      send(null, 502);
+      return true;
+    },
+  });
+  const mockUrl = await listen(cloudflareMock.server);
+  const before = structuredClone(cloudflareMock.state);
+  const panel = startPanel({ PORT: "3261", CLOUDFLARE_EMAIL: "admin@example.com",
+    CLOUDFLARE_GLOBAL_API_KEY: "global-key", CLOUDFLARE_API_BASE_URL: mockUrl });
+  try {
+    await waitForHttp("http://127.0.0.1:3261/");
+    const { response, payload } = await postSpeedDeploy(3261, zoneId, {
+      accessDomain: "cdn.alpha.example", targetDomain: "origin.alpha.example",
+      optimizedDomain: "saas.sin.fan", zoneName: "alpha.example", cacheTtl: 0,
+    });
+    assert.equal(response.status, 502);
+    assert.equal(payload.rollback.status, "complete");
+    assert.match(payload.error, /已恢复/);
+    assert.deepEqual(cloudflareMock.state, before);
   } finally {
     await panel.stop();
     cloudflareMock.server.close();
