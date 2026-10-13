@@ -908,3 +908,18 @@ export async function clearOperationHistory() {
 
   return payload.history;
 }
+
+
+export async function fetchLoginSettingsSecret(body) {
+  const response = await apiFetch("/api/session/security/secret", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  return readJson(response, "生成验证器密钥失败");
+}
+
+export async function updateLoginSettings(body) {
+  const response = await apiFetch("/api/session/security", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  return readJson(response, "保存登录方式失败");
+}

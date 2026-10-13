@@ -1,3 +1,4 @@
+import { renderLoginSettingsDialog } from "./login-settings-view.js";
 import { githubIssueUrl, navItems, zoneNavItems } from "../constants.js";
 import { icon } from "../icons.js";
 import { state } from "../state.js";
@@ -164,11 +165,14 @@ export function renderShell(content) {
               ${icon("plus")}
             </button>
           </div>
+          <button class="ghost-button" type="button" id="login-settings-open">登录设置</button>
           <button class="logout" type="button" id="logout-session">退出</button>
         </div>
       </header>
+      ${state.sessionError ? `<div class="notice error-notice">${escapeHtml(state.sessionError)}</div>` : ""}
       ${content}
       ${renderCloudflareAccountDialog()}
+      ${renderLoginSettingsDialog()}
     </main>
   `;
 }

@@ -573,6 +573,7 @@ export function createApiRouter({
   operationHistoryService,
   pageRulesController,
   panelAuthService,
+  panelSecurityController,
   publicOrigin = "",
   speedDeployController,
   sslSettingsController,
@@ -589,6 +590,8 @@ export function createApiRouter({
     ["GET /api/session/status", credentialsController.status],
     ["POST /api/session/connect", credentialsController.connect],
     ["POST /api/session/logout", credentialsController.logout],
+    ["POST /api/session/security/secret", panelSecurityController.secret],
+    ["PUT /api/session/security", panelSecurityController.update],
     ["POST /api/session/cloudflare-accounts", credentialsController.createCloudflareAccount],
     [
       "POST /api/session/cloudflare-accounts/:accountId/select",

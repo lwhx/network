@@ -35,73 +35,47 @@ function renderCloudflareAccountRows() {
     .join("");
 }
 
+function renderVerifierInput() {
+  return state.totpEnabled ? `
+    <label class="connect-field"><span>验证器验证码</span>
+      <input name="auth" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位动态验证码" required />
+    </label>` : "";
+}
+
+function renderRememberLogin() {
+  return `<label class="login-check"><input name="remember" type="checkbox" ${state.rememberLogin !== false ? "checked" : ""} />记住登录（最长 30 天）</label>`;
+}
+
 function renderAdminSetupBody() {
   return `
     <div class="connect-heading setup-heading">
-      <span class="connect-kicker">首次打开面板</span>
-      <h2>初始化蜘蛛网络</h2>
-      <p>先创建管理员账号并强制启用 2FA，下一步再添加 Cloudflare 多账号。</p>
+      <span class="connect-kicker">首次使用</span><h2>创建管理员</h2>
+      <p>设置账号密码后即可继续，验证器可稍后开启。</p>
     </div>
-
     <form class="connect-card setup-card" id="panel-setup-form">
-      <div class="connect-card-title">
-        <span>${icon("shield")}</span>
-        <div>
-          <h3>安全初始化</h3>
-          <p>管理员密码使用 scrypt 哈希保存；2FA 登录密钥只写入服务端 SQLite。</p>
-        </div>
-      </div>
-
-      <div class="setup-grid">
-        <section class="setup-group">
-          <h4>管理员账户</h4>
-          <label class="connect-field">
-            <span>初始化口令</span>
-            <input name="setupToken" type="password" autocomplete="off" placeholder="查看容器启动日志" value="${escapeHtml(state.setupToken || "")}" />
-          </label>
-          <label class="connect-field">
-            <span>用户名</span>
-            <input name="username" type="text" autocomplete="username" placeholder="admin" />
-          </label>
-          <label class="connect-field">
-            <span>密码</span>
-            <input name="password" type="password" autocomplete="new-password" placeholder="至少 10 位" />
-          </label>
-          <label class="connect-field">
-            <span>确认密码</span>
-            <input name="confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入密码" />
-          </label>
-        </section>
-
-        <section class="setup-group">
-          <h4>2FA 登录密钥</h4>
-          <div class="setup-secret-box">
-            <span>${state.setupLoadingSecret ? "正在生成..." : escapeHtml(state.setupSecret || "输入初始化口令后生成密钥")}</span>
-            <button class="ghost-button setup-secret-refresh" id="setup-secret-refresh" type="button" ${state.setupLoadingSecret || state.setupSubmitting ? "disabled" : ""}>
-              ${state.setupSecret ? "重新生成" : "生成密钥"}
-            </button>
+      <label class="connect-field"><span>初始化口令</span>
+        <input name="setupToken" type="password" autocomplete="off" value="${escapeHtml(state.setupToken || "")}" placeholder="仅首次创建管理员时需要" required />
+      </label>
+      <details class="setup-token-help"><summary>如何获取初始化口令？</summary>
+        <p>在服务器终端执行：</p><code>docker exec cloudflare-preferred-panel cat /data/setup-token.txt</code>
+      </details>
+      <label class="connect-field"><span>用户名</span><input name="username" type="text" autocomplete="username" value="admin" required /></label>
+      <label class="connect-field"><span>密码</span><input name="password" type="password" autocomplete="new-password" minlength="10" placeholder="至少 10 位" required /></label>
+      <label class="connect-field"><span>确认密码</span><input name="confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入密码" required /></label>
+      <label class="login-check"><input id="setup-use-2fa" type="checkbox" ${state.setupUseTwoFactor ? "checked" : ""} />现在绑定验证器（可选）</label>
+      ${state.setupUseTwoFactor ? `
+        <section class="setup-group setup-optional-totp">
+          <h4>绑定验证器</h4>
+          <div class="setup-secret-box"><span>${state.setupLoadingSecret ? "正在生成..." : escapeHtml(state.setupSecret || "生成密钥后添加到验证器")}</span>
+            <button class="ghost-button setup-secret-refresh" id="setup-secret-refresh" type="button" ${state.setupLoadingSecret || state.setupSubmitting ? "disabled" : ""}>${state.setupSecret ? "重新生成" : "生成密钥"}</button>
           </div>
           <input name="totpSecret" type="hidden" value="${escapeHtml(state.setupSecret)}" />
-          <p class="setup-note">把上方密钥添加到身份验证器后，输入当前 6 位验证码完成强制 2FA 绑定。</p>
-          <label class="connect-field">
-            <span>当前 2FA 验证码</span>
-            <input name="totpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位动态验证码" />
-          </label>
-        </section>
-      </div>
-
-      <div class="connect-security">
-        <strong>安全检查</strong>
-        <span>浏览器只保存 HttpOnly 随机会话 Cookie，最长 30 天。</span>
-        <span>管理员密码和 2FA 密钥不会进入 Cookie、localStorage 或操作历史。</span>
-      </div>
-
-      <button class="primary-button connect-submit" type="submit" ${state.setupSubmitting || state.setupLoadingSecret || !state.setupSecret ? "disabled" : ""}>
-        ${state.setupSubmitting ? "创建中..." : "创建管理员并进入下一步"}
-      </button>
+          <label class="connect-field"><span>验证器验证码</span><input name="totpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位动态验证码" required /></label>
+        </section>` : ""}
+      <p class="connect-help">管理员创建后自动登录。Cloudflare 账号在下一步添加。</p>
+      <button class="primary-button connect-submit" type="submit" ${state.setupSubmitting || state.setupLoadingSecret || (state.setupUseTwoFactor && !state.setupSecret) ? "disabled" : ""}>${state.setupSubmitting ? "创建中..." : "创建管理员并进入下一步"}</button>
       ${state.sessionError ? `<div class="notice error-notice">${escapeHtml(state.sessionError)}</div>` : ""}
-    </form>
-  `;
+    </form>`;
 }
 
 function renderSetupSessionRecovery() {
@@ -129,10 +103,8 @@ function renderSetupSessionRecovery() {
           <input name="password" type="password" autocomplete="current-password" placeholder="面板密码" />
         </label>
       </div>
-      <label class="connect-field">
-        <span>2FA 验证码</span>
-        <input name="auth" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位动态验证码" />
-      </label>
+      ${renderVerifierInput()}
+      ${renderRememberLogin()}
 
       <div class="connect-warning">
         <strong>为什么需要这一步</strong>
@@ -220,7 +192,7 @@ function renderConnectBody() {
         <span>${icon("shield")}</span>
         <div>
           <h3>面板登录</h3>
-          <p>输入管理员账号、密码和当前 2FA 验证码。</p>
+          <p>${state.totpEnabled ? "输入账号密码和验证器验证码。" : "输入账号密码即可登录。"}</p>
         </div>
       </div>
 
@@ -232,17 +204,9 @@ function renderConnectBody() {
         <span>密码</span>
         <input name="password" type="password" autocomplete="current-password" placeholder="面板密码" />
       </label>
-      <label class="connect-field">
-        <span>2FA 验证码</span>
-        <input name="auth" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位动态验证码" />
-      </label>
-      <p class="connect-help">如果是首次打开面板，会先进入初始化流程创建管理员账户和 Cloudflare 账号。</p>
-
-      <div class="connect-security">
-        <strong>安全保存方式</strong>
-        <span>浏览器仅保存 HttpOnly 随机会话 Cookie，最长 30 天。</span>
-        <span>Cookie、localStorage、接口响应和操作历史都不保存 Cloudflare API Key。</span>
-      </div>
+      ${renderVerifierInput()}
+      ${renderRememberLogin()}
+      <p class="connect-help">勾选记住登录后，关闭网页或重启容器仍可继续使用。</p>
 
       <button class="primary-button connect-submit" type="submit" ${state.connectingSession ? "disabled" : ""}>
         ${state.connectingSession ? "登录中..." : "登录并进入管理后台"}

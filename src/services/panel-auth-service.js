@@ -124,11 +124,14 @@ function validatePanelUserSetupInput({
   password = "",
   totpCode = "",
   totpSecret = "",
+  totpEnabled,
   username = "",
 } = {}) {
   const normalizedUsername = normalizeUsername(username);
   const normalizedPassword = normalizePassword(password);
-  const normalizedTotpSecret = normalizeTotpSecret(totpSecret);
+  const useTotp = totpEnabled === undefined ? Boolean(totpSecret) : totpEnabled;
+  if (typeof useTotp !== "boolean") return { error: "2FA 开关值无效。", statusCode: 400 };
+  const normalizedTotpSecret = useTotp ? normalizeTotpSecret(totpSecret) : "";
 
   if (!normalizedUsername || normalizedUsername.length < 3 || normalizedUsername.length > 32) {
     return {
@@ -144,14 +147,14 @@ function validatePanelUserSetupInput({
     };
   }
 
-  if (!normalizedTotpSecret) {
+  if (useTotp && !normalizedTotpSecret) {
     return {
       error: "必须创建并确认 2FA 登录密钥。",
       statusCode: 400,
     };
   }
 
-  if (!verifyTotp(totpCode, normalizedTotpSecret)) {
+  if (useTotp && !verifyTotp(totpCode, normalizedTotpSecret)) {
     return {
       error: "2FA 验证码错误，请确认已把登录密钥添加到身份验证器。",
       statusCode: 400,
@@ -279,30 +282,60 @@ export class PanelAuthService {
     };
   }
 
-  verify({ auth = "", password = "", user = "" } = {}) {
+  verify(credentials) {
+    return Boolean(this.authenticate(credentials));
+  }
+
+  authenticate({ auth = "", password = "", user = "" } = {}) {
     if (!this.isConfigured()) {
-      return false;
+      return null;
     }
 
     const panelUser = this.store.getPanelUser();
 
     if (!panelUser) {
-      return false;
+      return null;
     }
 
     const { hash } = hashPassword(password, panelUser.passwordSalt);
 
-    return (
+    const valid = (
       safeEqual(normalizeUsername(user), panelUser.username) &&
       safeEqual(hash, panelUser.passwordHash) &&
-      verifyTotp(auth, panelUser.totpSecret)
+      (!panelUser.totpEnabled || verifyTotp(auth, panelUser.totpSecret))
     );
+    return valid ? { authRevision: panelUser.authRevision } : null;
+  }
+
+  isTwoFactorEnabled() {
+    return Boolean(this.store?.getPanelUser()?.totpEnabled);
+  }
+
+  verifyCurrent({ password, auth = "" } = {}) {
+    const user = this.store?.getPanelUser();
+    return Boolean(user && this.verify({ user: user.username, password, auth }));
+  }
+
+  updateTwoFactor({ enabled, password, auth = "", totpSecret = "", totpCode = "" } = {}) {
+    return this.store.runSetupTransaction(() => {
+      if (!this.verifyCurrent({ password, auth })) {
+        return { statusCode: 401, error: "当前密码或验证码错误。" };
+      }
+      if (typeof enabled !== "boolean") return { statusCode: 400, error: "2FA 开关值无效。" };
+      const secret = enabled ? normalizeTotpSecret(totpSecret) : "";
+      if (enabled && (!secret || !verifyTotp(totpCode, secret))) {
+        return { statusCode: 400, error: "请用验证器确认新的 6 位验证码。" };
+      }
+      const authRevision = this.store.updateTwoFactor(secret);
+      return { statusCode: 200, totpEnabled: enabled, authRevision };
+    });
   }
 
   createPanelUserSetup({
     password = "",
     totpCode = "",
     totpSecret = "",
+    totpEnabled,
     username = "",
   } = {}) {
     const setupState = this.getSetupState();
@@ -310,6 +343,7 @@ export class PanelAuthService {
       password,
       totpCode,
       totpSecret,
+      totpEnabled,
       username,
     });
 
@@ -362,7 +396,7 @@ export class PanelAuthService {
 
     if (setupState.panelUserRequired) {
       return {
-        error: "请先创建管理员账户并绑定 2FA。",
+        error: "请先创建管理员账户。",
         statusCode: 412,
       };
     }
@@ -384,7 +418,7 @@ export class PanelAuthService {
 
         if (currentSetupState.panelUserRequired) {
           return {
-            error: "请先创建管理员账户并绑定 2FA。",
+            error: "请先创建管理员账户。",
             statusCode: 412,
           };
         }
@@ -418,7 +452,7 @@ export class PanelAuthService {
 
     if (setupState.panelUserRequired) {
       return {
-        error: "请先创建管理员账户并绑定 2FA。",
+        error: "请先创建管理员账户。",
         statusCode: 412,
       };
     }
@@ -465,12 +499,14 @@ export class PanelAuthService {
     password = "",
     totpCode = "",
     totpSecret = "",
+    totpEnabled,
     username = "",
   } = {}) {
     const userValidation = validatePanelUserSetupInput({
       password,
       totpCode,
       totpSecret,
+      totpEnabled,
       username,
     });
     const accountsValidation = validateCloudflareAccountsSetupInput([

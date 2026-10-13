@@ -23,6 +23,7 @@ function readConnectForm() {
 
   return {
     auth: String(formData.get("auth") || "").trim(),
+    remember: formData.get("remember") !== null,
     cloudflareAccountId: String(formData.get("cloudflareAccountId") || "").trim(),
     password: String(formData.get("password") || ""),
     user: String(formData.get("user") || "").trim(),
@@ -40,6 +41,7 @@ function readSetupLoginForm() {
 
   return {
     auth: String(formData.get("auth") || "").trim(),
+    remember: formData.get("remember") !== null,
     password: String(formData.get("password") || ""),
     user: String(formData.get("user") || "").trim(),
   };
@@ -107,7 +109,8 @@ function readAdminSetupForm() {
     password: String(formData.get("password") || ""),
     setupToken: String(formData.get("setupToken") || state.setupToken || "").trim(),
     totpCode: String(formData.get("totpCode") || "").trim(),
-    totpSecret: String(formData.get("totpSecret") || state.setupSecret || "").trim(),
+    totpEnabled: state.setupUseTwoFactor,
+    totpSecret: state.setupUseTwoFactor ? String(formData.get("totpSecret") || state.setupSecret || "").trim() : "",
     username: String(formData.get("username") || "").trim(),
   };
 }
@@ -124,6 +127,7 @@ function restoreAdminSetupForm(setup = {}) {
     password: setup.password || "",
     setupToken: setup.setupToken || state.setupToken || "",
     username: setup.username || "",
+    totpCode: setup.totpCode || "",
   };
 
   for (const [name, value] of Object.entries(values)) {
@@ -157,7 +161,8 @@ function readAllCloudflareAccountRows() {
   }));
 }
 
-function applySession(session) {
+export function applySession(session) {
+  if (session.totpEnabled !== undefined) state.totpEnabled = Boolean(session.totpEnabled);
   state.sessionAuthenticated = Boolean(session.authenticated);
   state.sessionHasServerCredentials = Boolean(session.hasCredentials);
   state.loginRequired = Boolean(session.loginRequired);
@@ -175,6 +180,7 @@ function applySession(session) {
 
 async function ensureSetupSecret({ force = false } = {}) {
   if (
+    !state.setupUseTwoFactor ||
     !state.setupRequired ||
     state.setupStep !== "admin" ||
     (state.setupSecret && !force) ||
@@ -240,8 +246,9 @@ export function createSessionActions({ loadZones, renderApp }) {
 
     const credentials = readConnectForm();
 
-    if (!credentials.user || !credentials.password || !credentials.auth) {
-      state.sessionError = "请输入用户名、密码和 2FA 验证码。";
+    state.rememberLogin = credentials.remember;
+    if (!credentials.user || !credentials.password || (state.totpEnabled && !credentials.auth)) {
+      state.sessionError = state.totpEnabled ? "请输入用户名、密码和 2FA 验证码。" : "请输入用户名和密码。";
       renderApp();
       return;
     }
@@ -272,7 +279,19 @@ export function createSessionActions({ loadZones, renderApp }) {
     }
   }
 
+  function toggleSetupTwoFactor(event) {
+    const setup = readAdminSetupForm();
+    state.setupToken = setup.setupToken;
+    state.setupUseTwoFactor = Boolean(event.target.checked);
+    state.setupSecret = "";
+    state.setupOtpAuthUrl = "";
+    state.sessionError = "";
+    renderApp();
+    restoreAdminSetupForm(setup);
+  }
+
   async function refreshSetupSecret() {
+    state.setupUseTwoFactor = true;
     const setup = readAdminSetupForm();
     state.setupToken = setup.setupToken;
 
@@ -312,7 +331,7 @@ export function createSessionActions({ loadZones, renderApp }) {
       return;
     }
 
-    if (!setup.totpSecret || !/^\d{6}$/.test(setup.totpCode)) {
+    if (setup.totpEnabled && (!setup.totpSecret || !/^\d{6}$/.test(setup.totpCode))) {
       state.sessionError = "请先创建 2FA 登录密钥，并输入当前 6 位验证码。";
       renderApp();
       return;
@@ -328,6 +347,7 @@ export function createSessionActions({ loadZones, renderApp }) {
         setupToken: setup.setupToken,
         totpCode: setup.totpCode,
         totpSecret: setup.totpSecret,
+        totpEnabled: setup.totpEnabled,
         username: setup.username,
       });
 
@@ -354,6 +374,7 @@ export function createSessionActions({ loadZones, renderApp }) {
     } finally {
       state.setupSubmitting = false;
       renderApp();
+      if (state.setupStep === "admin") restoreAdminSetupForm(setup);
     }
   }
 
@@ -412,8 +433,9 @@ export function createSessionActions({ loadZones, renderApp }) {
 
     const credentials = readSetupLoginForm();
 
-    if (!credentials.user || !credentials.password || !credentials.auth) {
-      state.sessionError = "请输入管理员用户名、密码和 2FA 验证码。";
+    state.rememberLogin = credentials.remember;
+    if (!credentials.user || !credentials.password || (state.totpEnabled && !credentials.auth)) {
+      state.sessionError = state.totpEnabled ? "请输入管理员用户名、密码和 2FA 验证码。" : "请输入管理员用户名和密码。";
       renderApp();
       return;
     }
@@ -558,14 +580,23 @@ export function createSessionActions({ loadZones, renderApp }) {
   }
 
   async function logoutSession() {
+    const previousTotpEnabled = state.totpEnabled;
     try {
       await logoutCloudflareAccount();
-    } catch {
-      // Local state should still be cleared if the network request fails.
+    } catch (error) {
+      state.sessionError = `退出失败，请重试：${error.message}`;
+      renderApp();
+      return;
     }
 
     resetSessionState();
+    state.totpEnabled = previousTotpEnabled;
     history.replaceState(null, "", location.pathname);
+    try {
+      applySession(await fetchSessionStatus());
+    } catch {
+      // Logout succeeded; retain the last known login mode if status is unavailable.
+    }
     renderApp();
   }
 
@@ -582,6 +613,7 @@ export function createSessionActions({ loadZones, renderApp }) {
     removeSetupCloudflareAccount,
     recoverSetupSession,
     refreshSetupSecret,
+    toggleSetupTwoFactor,
     submitCloudflareAccount,
   };
 }

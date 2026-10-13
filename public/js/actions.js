@@ -1,3 +1,4 @@
+import { createLoginSettingsActions } from "./actions/login-settings-actions.js";
 import { createAnalyticsActions } from "./actions/analytics-actions.js";
 import { createAutomationActions } from "./actions/automation-actions.js";
 import { createDeveloperResourcesActions } from "./actions/developer-resources-actions.js";
@@ -100,6 +101,7 @@ export function createActions({ renderApp }) {
   }
 
   return {
+    ...createLoginSettingsActions({ renderApp }),
     ...analyticsActions,
     ...automationActions,
     ...developerResourcesActions,

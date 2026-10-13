@@ -1,3 +1,4 @@
+import { PanelSecurityController } from "./controllers/panel-security-controller.js";
 import { CloudflareClient } from "./services/cloudflare/cloudflare-client.js";
 import { AnalyticsService } from "./services/cloudflare/analytics-service.js";
 import { AutomationService } from "./services/cloudflare/automation-service.js";
@@ -95,6 +96,7 @@ export function createContainer(config) {
     dnsRecordsService,
   });
   const credentialSessionService = new CredentialSessionService({
+    store: sqliteStore,
     publicOrigin: config.server.publicOrigin,
     secureCookies: config.server.secureCookies,
     trustProxyHeaders: config.server.trustProxyHeaders,
@@ -125,6 +127,9 @@ export function createContainer(config) {
     credentialSessionService,
     panelAuthService,
     setupGuardService,
+  });
+  const panelSecurityController = new PanelSecurityController({
+    credentialsController, panelAuthService, credentialSessionService,
   });
   const developerResourcesController = new DeveloperResourcesController({
     developerResourcesService,
@@ -157,6 +162,7 @@ export function createContainer(config) {
       operationHistoryService,
       pageRulesController,
       panelAuthService,
+      panelSecurityController,
       publicOrigin: config.server.publicOrigin,
       setupGuardService,
       speedDeployController,
