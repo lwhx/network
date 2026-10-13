@@ -292,6 +292,22 @@ export class SqliteStore {
     return created;
   }
 
+  updateCloudflareAccount(accountId, { email, globalApiKey, name }) {
+    const id = normalizeString(accountId);
+    if (!id) return null;
+    const result = this.database.prepare(`UPDATE cloudflare_accounts
+      SET name = ?, email = ?, global_api_key = ?, updated_at = ? WHERE id = ?`)
+      .run(normalizeString(name), normalizeString(email).toLowerCase(),
+        this.secretBox.encrypt(normalizeString(globalApiKey)), nowIso(), id);
+    return result.changes ? this.getCloudflareAccount(id) : null;
+  }
+
+  deleteCloudflareAccount(accountId) {
+    const id = normalizeString(accountId);
+    if (!id) return false;
+    return this.database.prepare("DELETE FROM cloudflare_accounts WHERE id = ?").run(id).changes > 0;
+  }
+
   runSetupTransaction(callback) {
     this.database.exec("BEGIN IMMEDIATE");
 

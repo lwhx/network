@@ -1,4 +1,5 @@
 import { renderLoginSettingsDialog } from "./login-settings-view.js";
+import { renderAccountManagementDialog } from "./account-management-view.js";
 import { githubIssueUrl, navItems, zoneNavItems } from "../constants.js";
 import { icon } from "../icons.js";
 import { state } from "../state.js";
@@ -166,6 +167,7 @@ export function renderShell(content) {
             </button>
           </div>
           <button class="ghost-button" type="button" id="login-settings-open">登录设置</button>
+          <button class="ghost-button" type="button" id="cloudflare-account-manage">账号管理</button>
           <button class="logout" type="button" id="logout-session">退出</button>
         </div>
       </header>
@@ -173,6 +175,7 @@ export function renderShell(content) {
       ${content}
       ${renderCloudflareAccountDialog()}
       ${renderLoginSettingsDialog()}
+      ${renderAccountManagementDialog()}
     </main>
   `;
 }

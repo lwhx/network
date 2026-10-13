@@ -8,6 +8,7 @@ import {
   saveAutomationTieredCaching,
 } from "../api.js";
 import { state } from "../state.js";
+import { beginScopedRequest, captureRequestContext } from "../request-scope.js";
 
 function firstZoneId() {
   return state.zones[0]?.id || "";
@@ -36,6 +37,10 @@ function setPending(key) {
 
 function clearPending() {
   state.automationPendingKey = "";
+}
+
+function readAutomationContext() {
+  return JSON.stringify([state.view, state.mainSection, activeAutomationZoneId()]);
 }
 
 export function createAutomationActions({ renderApp }) {
@@ -71,13 +76,24 @@ export function createAutomationActions({ renderApp }) {
     state.automationNotice = "";
     renderApp();
 
+    const requestScope = beginScopedRequest("automation:loadAutomationState", readAutomationContext);
+
     try {
-      applyAutomationPayload(await fetchAutomationState(zoneId));
+      const payload = await fetchAutomationState(zoneId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      applyAutomationPayload(payload);
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.automationNotice = error.message;
     } finally {
-      state.automationLoading = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.automationLoading = false;
+        renderApp();
+      }
     }
   }
 
@@ -115,17 +131,28 @@ export function createAutomationActions({ renderApp }) {
     state.automationNotice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readAutomationContext);
+
     try {
-      applyAutomationPayload(await applyAutomationPreset(zoneId, state.automationPreset));
+      const payload = await applyAutomationPreset(zoneId, state.automationPreset);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      applyAutomationPayload(payload);
       state.automationNotice =
         state.automationPreset === "security"
           ? "安全优化配置已应用"
           : "速度优化配置已应用";
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.automationNotice = error.message;
     } finally {
-      state.automationApplying = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.automationApplying = false;
+        renderApp();
+      }
     }
   }
 
@@ -139,14 +166,25 @@ export function createAutomationActions({ renderApp }) {
     setPending(updateKey);
     renderApp();
 
+    const requestScope = captureRequestContext(readAutomationContext);
+
     try {
-      applyAutomationPayload(await request(zoneId));
+      const payload = await request(zoneId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      applyAutomationPayload(payload);
       state.automationNotice = "设置已保存";
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.automationNotice = error.message;
     } finally {
-      clearPending();
-      renderApp();
+      if (requestScope.isCurrent()) {
+        clearPending();
+        renderApp();
+      }
     }
   }
 

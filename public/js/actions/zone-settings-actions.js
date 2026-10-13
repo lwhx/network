@@ -23,6 +23,7 @@ import {
 import { defaultFirewallForm, defaultPageRuleForm } from "../constants.js";
 import { findFirewallExample } from "../firewall-examples.js";
 import { resetFirewallForm, resetPageRuleForm, state } from "../state.js";
+import { beginScopedRequest, captureRequestContext } from "../request-scope.js";
 
 function readSelectedZoneId() {
   return state.selectedZone?.id || "";
@@ -218,6 +219,10 @@ function applyFirewallPayload(payload) {
   state.firewallWarnings = Array.isArray(payload?.warnings) ? payload.warnings : [];
 }
 
+function readZoneContext() {
+  return JSON.stringify([state.view, state.mainSection, state.zoneSection, readSelectedZoneId()]);
+}
+
 export function createZoneSettingsActions({ renderApp }) {
   async function loadCacheSettings() {
     const zoneId = readSelectedZoneId();
@@ -230,13 +235,24 @@ export function createZoneSettingsActions({ renderApp }) {
     state.cacheError = "";
     renderApp();
 
+    const requestScope = beginScopedRequest("zone-settings:loadCacheSettings", readZoneContext);
+
     try {
-      applyCachePayload(await fetchCacheSettings(zoneId));
+      const payload = await fetchCacheSettings(zoneId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      applyCachePayload(payload);
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.cacheError = error.message;
     } finally {
-      state.loadingCacheSettings = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.loadingCacheSettings = false;
+        renderApp();
+      }
     }
   }
 
@@ -251,13 +267,24 @@ export function createZoneSettingsActions({ renderApp }) {
     state.firewallError = "";
     renderApp();
 
+    const requestScope = beginScopedRequest("zone-settings:loadFirewallRules", readZoneContext);
+
     try {
-      applyFirewallPayload(await fetchFirewallRules(zoneId));
+      const payload = await fetchFirewallRules(zoneId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      applyFirewallPayload(payload);
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.firewallError = error.message;
     } finally {
-      state.loadingFirewallRules = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.loadingFirewallRules = false;
+        renderApp();
+      }
     }
   }
 
@@ -272,13 +299,24 @@ export function createZoneSettingsActions({ renderApp }) {
     state.pageRulesError = "";
     renderApp();
 
+    const requestScope = beginScopedRequest("zone-settings:loadPageRules", readZoneContext);
+
     try {
-      state.pageRules = await fetchPageRules(zoneId);
+      const payload = await fetchPageRules(zoneId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      state.pageRules = payload;
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.pageRulesError = error.message;
     } finally {
-      state.loadingPageRules = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.loadingPageRules = false;
+        renderApp();
+      }
     }
   }
 
@@ -293,13 +331,24 @@ export function createZoneSettingsActions({ renderApp }) {
     state.certificateError = "";
     renderApp();
 
+    const requestScope = beginScopedRequest("zone-settings:loadCertificates", readZoneContext);
+
     try {
-      applyCertificatePayload(await fetchCertificates(zoneId));
+      const payload = await fetchCertificates(zoneId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      applyCertificatePayload(payload);
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.certificateError = error.message;
     } finally {
-      state.loadingCertificates = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.loadingCertificates = false;
+        renderApp();
+      }
     }
   }
 
@@ -314,13 +363,24 @@ export function createZoneSettingsActions({ renderApp }) {
     state.sslError = "";
     renderApp();
 
+    const requestScope = beginScopedRequest("zone-settings:loadSslSettings", readZoneContext);
+
     try {
-      applySslPayload(await fetchSslSettings(zoneId));
+      const payload = await fetchSslSettings(zoneId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      applySslPayload(payload);
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.sslError = error.message;
     } finally {
-      state.loadingSslSettings = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.loadingSslSettings = false;
+        renderApp();
+      }
     }
   }
 
@@ -361,14 +421,25 @@ export function createZoneSettingsActions({ renderApp }) {
     state.notice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
-      applyCachePayload(await saveCacheSettings(zoneId, { [key]: value }));
+      const payload = await saveCacheSettings(zoneId, { [key]: value });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      applyCachePayload(payload);
       state.notice = "缓存设置已保存";
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.savingCacheSettings = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.savingCacheSettings = false;
+        renderApp();
+      }
     }
   }
 
@@ -383,14 +454,25 @@ export function createZoneSettingsActions({ renderApp }) {
     state.notice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
-      applySslPayload(await saveSslSettings(zoneId, { [key]: value }));
+      const payload = await saveSslSettings(zoneId, { [key]: value });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      applySslPayload(payload);
       state.notice = "SSL/TLS 设置已保存";
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.savingSslSettings = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.savingSslSettings = false;
+        renderApp();
+      }
     }
   }
 
@@ -423,14 +505,24 @@ export function createZoneSettingsActions({ renderApp }) {
     state.notice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
       await purgeCache(zoneId, { mode: "everything" });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = "已提交清除所有缓存请求";
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.purgingCache = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.purgingCache = false;
+        renderApp();
+      }
     }
   }
 
@@ -449,8 +541,13 @@ export function createZoneSettingsActions({ renderApp }) {
     state.notice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
       await purgeCache(zoneId, { mode: "url", url });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
 
       if (input) {
         input.value = "";
@@ -458,10 +555,15 @@ export function createZoneSettingsActions({ renderApp }) {
 
       state.notice = "已提交 URL 清除请求";
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.purgingCache = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.purgingCache = false;
+        renderApp();
+      }
     }
   }
 
@@ -537,6 +639,8 @@ export function createZoneSettingsActions({ renderApp }) {
     state.notice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
       const editingRule = state.firewallRules.find(
         (rule) => rule.id === state.editingFirewallRuleId
@@ -552,19 +656,33 @@ export function createZoneSettingsActions({ renderApp }) {
             paused: Boolean(editingRule.paused),
           })
         );
+        if (!requestScope.isCurrent()) {
+          return;
+        }
         state.notice = "防火墙规则已更新";
       } else {
         await createFirewallRule(zoneId, state.firewallForm);
+        if (!requestScope.isCurrent()) {
+          return;
+        }
         state.notice = "防火墙规则已创建";
       }
 
       resetFirewallForm();
       await loadFirewallRules();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.savingFirewallRule = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.savingFirewallRule = false;
+        renderApp();
+      }
     }
   }
 
@@ -580,15 +698,28 @@ export function createZoneSettingsActions({ renderApp }) {
     state.notice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
       await createRulesetRule(zoneId, readRulesetForm());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = "新版防火墙规则已创建";
       await loadFirewallRules();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.savingRulesetRule = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.savingRulesetRule = false;
+        renderApp();
+      }
     }
   }
 
@@ -606,15 +737,28 @@ export function createZoneSettingsActions({ renderApp }) {
     state.deletingFirewallRuleId = ruleId;
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
       await removeRulesetRule(zoneId, rulesetId, ruleId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = "新版防火墙规则已删除";
       await loadFirewallRules();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.deletingFirewallRuleId = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.deletingFirewallRuleId = "";
+        renderApp();
+      }
     }
   }
 
@@ -636,15 +780,28 @@ export function createZoneSettingsActions({ renderApp }) {
     state.notice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
       await removeFirewallRule(zoneId, ruleId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = "防火墙规则已删除";
       await loadFirewallRules();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.deletingFirewallRuleId = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.deletingFirewallRuleId = "";
+        renderApp();
+      }
     }
   }
 
@@ -661,19 +818,32 @@ export function createZoneSettingsActions({ renderApp }) {
     state.notice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
       await updateFirewallRule(
         zoneId,
         ruleId,
         buildFirewallUpdatePayload(rule, { paused: nextPaused })
       );
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = nextPaused ? "防火墙规则已暂停" : "防火墙规则已启用";
       await loadFirewallRules();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.updatingFirewallRuleId = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.updatingFirewallRuleId = "";
+        renderApp();
+      }
     }
   }
 
@@ -746,22 +916,38 @@ export function createZoneSettingsActions({ renderApp }) {
     state.notice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
       if (state.editingPageRuleId) {
         await updatePageRule(zoneId, state.editingPageRuleId, state.pageRuleForm);
+        if (!requestScope.isCurrent()) {
+          return;
+        }
         state.notice = "页面规则已更新";
       } else {
         await createPageRule(zoneId, state.pageRuleForm);
+        if (!requestScope.isCurrent()) {
+          return;
+        }
         state.notice = "页面规则已创建";
       }
 
       resetPageRuleForm();
       await loadPageRules();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.savingPageRule = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.savingPageRule = false;
+        renderApp();
+      }
     }
   }
 
@@ -778,15 +964,28 @@ export function createZoneSettingsActions({ renderApp }) {
     state.notice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
       await updatePageRule(zoneId, ruleId, readPageRulePayload(rule, { status: nextStatus }));
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = nextStatus === "active" ? "页面规则已启用" : "页面规则已禁用";
       await loadPageRules();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.updatingPageRuleId = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.updatingPageRuleId = "";
+        renderApp();
+      }
     }
   }
 
@@ -808,15 +1007,28 @@ export function createZoneSettingsActions({ renderApp }) {
     state.notice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
       await removePageRule(zoneId, ruleId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = "页面规则已删除";
       await loadPageRules();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.deletingPageRuleId = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.deletingPageRuleId = "";
+        renderApp();
+      }
     }
   }
 
@@ -839,15 +1051,28 @@ export function createZoneSettingsActions({ renderApp }) {
     state.notice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
       await removeCustomCertificate(zoneId, certificateId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = "证书已删除";
       await loadCertificates();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.deletingCertificateId = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.deletingCertificateId = "";
+        renderApp();
+      }
     }
   }
 
@@ -863,15 +1088,28 @@ export function createZoneSettingsActions({ renderApp }) {
     state.notice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
       await uploadCustomCertificate(zoneId, readCertificateUploadForm());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = "自定义证书已上传";
       await loadCertificates();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.savingCertificate = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.savingCertificate = false;
+        renderApp();
+      }
     }
   }
 
@@ -887,18 +1125,31 @@ export function createZoneSettingsActions({ renderApp }) {
     state.notice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
       const certificate = await createOriginCertificate(zoneId, readOriginCertificateForm());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.originCertificateCreated = certificate;
       state.notice = certificate.certificate
         ? "Origin CA 证书已创建，请立即复制证书内容并妥善保存"
         : "Origin CA 证书已创建";
       await loadCertificates();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.savingCertificate = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.savingCertificate = false;
+        renderApp();
+      }
     }
   }
 
@@ -916,15 +1167,28 @@ export function createZoneSettingsActions({ renderApp }) {
     state.deletingCertificateId = certificateId;
     renderApp();
 
+    const requestScope = captureRequestContext(readZoneContext);
+
     try {
       await removeOriginCertificate(zoneId, certificateId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = "Origin CA 证书已删除";
       await loadCertificates();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.notice = error.message;
     } finally {
-      state.deletingCertificateId = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.deletingCertificateId = "";
+        renderApp();
+      }
     }
   }
 

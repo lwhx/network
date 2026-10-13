@@ -1,5 +1,6 @@
 import { fetchZoneAnalytics } from "../api.js";
 import { state } from "../state.js";
+import { beginScopedRequest } from "../request-scope.js";
 
 const rangeDays = {
   "24h": 1,
@@ -9,6 +10,11 @@ const rangeDays = {
 
 function readSelectedZoneId() {
   return state.selectedZone?.id || "";
+}
+
+function readAnalyticsContext() {
+  return JSON.stringify([state.view, state.mainSection, state.zoneSection,
+    readSelectedZoneId(), state.analyticsRange, state.analyticsStartDate, state.analyticsEndDate]);
 }
 
 export function createAnalyticsActions({ renderApp }) {
@@ -25,17 +31,28 @@ export function createAnalyticsActions({ renderApp }) {
     state.analytics = null;
     renderApp();
 
+    const requestScope = beginScopedRequest("analytics:loadZoneAnalytics", readAnalyticsContext);
+
     try {
-      state.analytics = await fetchZoneAnalytics(zoneId, {
+      const payload = await fetchZoneAnalytics(zoneId, {
         days: rangeDays[state.analyticsRange],
         startDate: state.analyticsStartDate,
         endDate: state.analyticsEndDate,
       });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      state.analytics = payload;
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.analyticsError = error.message;
     } finally {
-      state.loadingAnalytics = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.loadingAnalytics = false;
+        renderApp();
+      }
     }
   }
 

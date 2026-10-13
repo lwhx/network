@@ -10,6 +10,7 @@ import { proxiableTypes } from "../constants.js";
 import { filterDnsRecords } from "../dns-record-filter.js";
 import { collectDnsForm, fillDnsFormFromRecord } from "../forms/dns-form.js";
 import { resetDnsBulkForm, resetDnsForm, state } from "../state.js";
+import { beginScopedRequest, captureRequestContext } from "../request-scope.js";
 
 const bulkBooleanValues = new Map([
   ["true", true],
@@ -179,6 +180,10 @@ export function createDnsActions({ renderApp }) {
     if (!state.selectedZone?.id) {
       return;
     }
+    const zoneId = state.selectedZone.id;
+    const request = beginScopedRequest("dns", () => state.selectedZone?.id || "");
+    state.dnsRecords = [];
+    if (state.dnsBulkResult?.zoneId !== zoneId) state.dnsBulkResult = null;
 
     if (state.dnsSearchZoneId !== state.selectedZone.id) {
       state.dnsSearchQuery = "";
@@ -191,12 +196,17 @@ export function createDnsActions({ renderApp }) {
     renderApp();
 
     try {
-      state.dnsRecords = await fetchDnsRecords(state.selectedZone.id);
+      const records = await fetchDnsRecords(zoneId, { signal: request.signal });
+      if (!request.isCurrent()) return;
+      state.dnsRecords = records;
     } catch (error) {
+      if (!request.isCurrent()) return;
       state.dnsError = error.message;
     } finally {
-      state.loadingDns = false;
-      renderApp();
+      if (request.isCurrent()) {
+        state.loadingDns = false;
+        renderApp();
+      }
     }
   }
 
@@ -257,21 +267,60 @@ export function createDnsActions({ renderApp }) {
       return;
     }
 
-    state.savingDnsBulk = true;
+    await runDnsBulk("create", records);
+  }
+
+  function summarizeBulk(results) {
+    return { total: results.length, succeeded: results.filter((item) => item.status === "success").length,
+      failed: results.filter((item) => item.status === "failed").length,
+      unknown: results.filter((item) => item.status === "unknown").length,
+      skipped: results.filter((item) => item.status === "skipped").length };
+  }
+
+  async function runDnsBulk(type, inputs, retryIndices = null) {
+    if (!state.selectedZone?.id || state.savingDnsBulk || state.deletingDnsBulk) return;
+    const zoneId = state.selectedZone.id;
+    const accountId = state.activeCloudflareAccountId;
+    const request = captureRequestContext(() => state.selectedZone?.id || "");
+    const busyKey = type === "create" ? "savingDnsBulk" : "deletingDnsBulk";
+    const previous = state.dnsBulkResult;
+    state[busyKey] = true;
     state.notice = "";
     renderApp();
-
     try {
-      const createdRecords = await createDnsRecordsBulk(state.selectedZone.id, records);
-      resetDnsBulkForm();
-      state.notice = `已批量添加 ${createdRecords.length} 条 DNS 记录`;
+      const payload = type === "create" ? await createDnsRecordsBulk(zoneId, inputs) : await removeDnsRecordsBulk(zoneId, inputs);
+      if (!request.isCurrent()) return;
+      const results = retryIndices ? [...previous.results] : payload.results;
+      if (retryIndices) {
+        payload.results.forEach((item, index) => {
+          const originalIndex = retryIndices[index];
+          results[originalIndex] = { ...item, index: originalIndex };
+        });
+      }
+      const summary = summarizeBulk(results);
+      state.dnsBulkResult = { type, zoneId, accountId, results, summary };
+      if (type === "create") resetDnsBulkForm();
+      state.selectedDnsRecordIds = [];
+      state.notice = `批量${type === "create" ? "添加" : "删除"}：成功 ${summary.succeeded}，失败 ${summary.failed}，结果未确认 ${summary.unknown}，未执行 ${summary.skipped}`;
       await loadDnsRecords();
     } catch (error) {
-      state.notice = error.message;
+      if (!request.isCurrent()) return;
+      state.notice = `${error.message}；请先刷新记录核查结果，再决定是否重新提交。`;
     } finally {
-      state.savingDnsBulk = false;
-      renderApp();
+      if (request.isCurrent()) {
+        state[busyKey] = false;
+        renderApp();
+      }
     }
+  }
+
+  async function retryDnsBulk() {
+    const result = state.dnsBulkResult;
+    if (!result || result.zoneId !== state.selectedZone?.id || result.accountId !== state.activeCloudflareAccountId) return;
+    const retryIndices = result.results.map((item, index) => item.retryable ? index : -1).filter((index) => index >= 0);
+    if (!retryIndices.length) return;
+    if (result.type === "delete" && !window.confirm(`确定重试删除 ${retryIndices.length} 条记录吗？`)) return;
+    await runDnsBulk(result.type, retryIndices.map((index) => result.type === "create" ? result.results[index].input : result.results[index].recordId), retryIndices);
   }
 
   function syncDnsFormType(event) {
@@ -293,6 +342,8 @@ export function createDnsActions({ renderApp }) {
     }
 
     const record = collectDnsForm();
+    const zoneId = state.selectedZone.id;
+    const request = captureRequestContext(() => state.selectedZone?.id || "");
     const isEdit = Boolean(record.id);
     state.dnsForm = { ...record, ttl: String(record.ttl) };
     state.savingDns = true;
@@ -301,19 +352,22 @@ export function createDnsActions({ renderApp }) {
 
     try {
       if (isEdit) {
-        await updateDnsRecord(state.selectedZone.id, record.id, record);
+        await updateDnsRecord(zoneId, record.id, record);
       } else {
-        await createDnsRecord(state.selectedZone.id, record);
+        await createDnsRecord(zoneId, record);
       }
-
+      if (!request.isCurrent()) return;
       resetDnsForm();
       state.notice = isEdit ? "DNS 记录已更新" : "DNS 记录已添加";
       await loadDnsRecords();
     } catch (error) {
+      if (!request.isCurrent()) return;
       state.notice = error.message;
     } finally {
-      state.savingDns = false;
-      renderApp();
+      if (request.isCurrent()) {
+        state.savingDns = false;
+        renderApp();
+      }
     }
   }
 
@@ -346,12 +400,15 @@ export function createDnsActions({ renderApp }) {
     if (!confirmed) {
       return;
     }
-
+    const zoneId = state.selectedZone.id;
+    const request = captureRequestContext(() => state.selectedZone?.id || "");
     try {
-      await removeDnsRecord(state.selectedZone.id, record.id);
+      await removeDnsRecord(zoneId, record.id);
+      if (!request.isCurrent()) return;
       state.notice = "DNS 记录已删除";
       await loadDnsRecords();
     } catch (error) {
+      if (!request.isCurrent()) return;
       state.notice = error.message;
       renderApp();
     }
@@ -427,24 +484,11 @@ export function createDnsActions({ renderApp }) {
       return;
     }
 
-    state.deletingDnsBulk = true;
-    state.notice = "";
-    renderApp();
-
-    try {
-      await removeDnsRecordsBulk(state.selectedZone.id, recordIds);
-      state.selectedDnsRecordIds = [];
-      state.notice = `已批量删除 ${recordIds.length} 条 DNS 记录`;
-      await loadDnsRecords();
-    } catch (error) {
-      state.notice = error.message;
-    } finally {
-      state.deletingDnsBulk = false;
-      renderApp();
-    }
+    await runDnsBulk("delete", recordIds);
   }
 
   return {
+    retryDnsBulk,
     closeDnsBulkForm,
     deleteDnsRecord,
     deleteSelectedDnsRecords,

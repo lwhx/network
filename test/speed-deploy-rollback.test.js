@@ -124,7 +124,7 @@ for (const [stage, matches] of stages) {
         if (failed || !matches(call)) return false;
         failed = true;
         if (applied) apply();
-        send(null, 502);
+        send(null, applied ? 502 : 400);
         return true;
       } });
       const before = structuredClone(env.state);

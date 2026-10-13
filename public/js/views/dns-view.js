@@ -3,6 +3,7 @@ import { filterDnsRecords } from "../dns-record-filter.js";
 import { state } from "../state.js";
 import { escapeHtml, planLabel, statusLabel } from "../utils.js";
 import { renderDnsBulkForm } from "./dns-bulk-form-view.js";
+import { renderDnsBulkResults } from "./dns-bulk-results-view.js";
 import { renderDnsForm } from "./dns-form-view.js";
 import { renderDnsRecords } from "./dns-records-view.js";
 
@@ -56,6 +57,7 @@ export function renderDnsView() {
 
     ${state.dnsFormOpen ? renderDnsForm() : ""}
     ${state.dnsBulkFormOpen ? renderDnsBulkForm() : ""}
+    ${renderDnsBulkResults()}
 
     <section class="panel dns-records-panel">
       <div class="dns-record-title">

@@ -229,17 +229,20 @@ export class CloudflareClient {
     const payload = await response.json().catch(() => null);
 
     if (response.ok && response.status === 204 && !payload) {
-      return { success: true, result: null };
+      return { success: true, result: null, httpStatus: 204 };
     }
 
-    if (!response.ok || !payload?.success) {
+    if (!response.ok || payload?.success !== true) {
       const cloudflareMessage =
-        payload?.errors
-          ?.map((item) => item.message)
-          .filter(Boolean)
-          .join("；") || `Cloudflare API 请求失败 (${response.status})`;
+        (Array.isArray(payload?.errors)
+          ? payload.errors.map((item) => item?.message).filter(Boolean).join("；")
+          : "") || `Cloudflare API 请求失败 (${response.status})`;
 
-      throw new HttpError(response.status, cloudflareMessage);
+      const error = new HttpError(response.ok ? 502 : response.status, cloudflareMessage);
+      error.remoteOutcomeUnknown =
+        !["GET", "HEAD"].includes(method) &&
+        (response.status >= 500 || (response.ok && payload?.success !== false));
+      throw error;
     }
 
     return payload;

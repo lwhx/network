@@ -5,6 +5,7 @@ import {
 } from "../api.js";
 import { defaultSpeedForm } from "../constants.js";
 import { state } from "../state.js";
+import { beginScopedRequest, captureRequestContext } from "../request-scope.js";
 
 const progressStages = [
   { delay: 160, value: 18 },
@@ -104,6 +105,14 @@ function zoneForSpeedDomain(domain) {
   return findZoneForAccessDomain(domain.accessDomain || domain.domain || "");
 }
 
+function readSpeedContext() {
+  return JSON.stringify([state.view, state.mainSection, state.speedStep]);
+}
+
+function readSpeedDomainsContext() {
+  return JSON.stringify([readSpeedContext(), state.speedDomainsOpen, state.zones.map((zone) => zone.id)]);
+}
+
 export function createSpeedActions({ renderApp }) {
   let activeDeployRun = 0;
   let deployTimers = [];
@@ -121,11 +130,12 @@ export function createSpeedActions({ renderApp }) {
   }
 
   function showSpeedNotice(message) {
+    const noticeScope = captureRequestContext(() => JSON.stringify([state.view, state.mainSection]));
     state.speedNotice = message;
     renderApp();
 
     window.setTimeout(() => {
-      if (state.speedNotice === message) {
+      if (noticeScope.isCurrent() && state.speedNotice === message) {
         state.speedNotice = "";
         renderApp();
       }
@@ -175,6 +185,8 @@ export function createSpeedActions({ renderApp }) {
     cancelDeploy();
     activeDeployRun += 1;
     const deployRun = activeDeployRun;
+    const form = { ...state.speedForm };
+    const requestScope = captureRequestContext(() => JSON.stringify([readSpeedContext(), state.speedForm]));
     state.speedDeploying = true;
     state.speedProgress = 0;
     state.speedNotice = "";
@@ -182,7 +194,7 @@ export function createSpeedActions({ renderApp }) {
 
     progressStages.forEach((stage) => {
       const timerId = window.setTimeout(() => {
-        if (deployRun !== activeDeployRun || !state.speedDeploying) {
+        if (!requestScope.isCurrent() || deployRun !== activeDeployRun || !state.speedDeploying) {
           return;
         }
 
@@ -194,15 +206,15 @@ export function createSpeedActions({ renderApp }) {
 
     try {
       const deployment = await deploySpeedAcceleration(zone.id, {
-        ...state.speedForm,
+        ...form,
         zoneName: zone.name,
       });
 
-      if (deployRun !== activeDeployRun || !state.speedDeploying) {
+      if (!requestScope.isCurrent() || deployRun !== activeDeployRun || !state.speedDeploying) {
         return;
       }
 
-      const nextDomain = makeAcceleratedDomain(state.speedForm, deployment);
+      const nextDomain = makeAcceleratedDomain(form, deployment);
       const existingIndex = state.speedAcceleratedDomains.findIndex(
         (domain) => domain.accessDomain === nextDomain.accessDomain
       );
@@ -218,7 +230,7 @@ export function createSpeedActions({ renderApp }) {
       state.speedStep = "complete";
       renderApp();
     } catch (deployError) {
-      if (deployRun !== activeDeployRun) {
+      if (!requestScope.isCurrent() || deployRun !== activeDeployRun) {
         return;
       }
 
@@ -226,6 +238,10 @@ export function createSpeedActions({ renderApp }) {
       state.speedDeploying = false;
       state.speedProgress = 0;
       showSpeedNotice(deployError.message || "部署一键加速失败");
+    } finally {
+      if (deployRun === activeDeployRun) {
+        clearDeployTimers();
+      }
     }
   }
 
@@ -254,6 +270,8 @@ export function createSpeedActions({ renderApp }) {
     state.speedNotice = "";
     renderApp();
 
+    const requestScope = beginScopedRequest("speed:refreshSpeedDomainsDialog", readSpeedDomainsContext);
+
     try {
       const results = await Promise.all(
         state.zones.map((zone) =>
@@ -268,12 +286,20 @@ export function createSpeedActions({ renderApp }) {
             .catch(() => [])
         )
       );
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.speedAcceleratedDomains = results.flat();
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       showSpeedNotice(error.message);
     } finally {
-      state.speedDomainsLoading = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.speedDomainsLoading = false;
+        renderApp();
+      }
     }
   }
 
@@ -307,14 +333,25 @@ export function createSpeedActions({ renderApp }) {
     state.speedDomainsLoading = true;
     renderApp();
 
+    let requestScope = captureRequestContext(() => JSON.stringify([readSpeedDomainsContext(), state.speedDomainDeleteId]));
+
     try {
       await removeSpeedAcceleratedDomain(zone.id, domain.accessDomain || domain.domain);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.speedDomainDeleteId = "";
+      requestScope = captureRequestContext(() => JSON.stringify([readSpeedDomainsContext(), state.speedDomainDeleteId]));
       await refreshSpeedDomainsDialog();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       showSpeedNotice("加速域名已删除");
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       showSpeedNotice(error.message);
-    } finally {
       state.speedDomainsLoading = false;
       renderApp();
     }

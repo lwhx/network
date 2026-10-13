@@ -10,7 +10,8 @@ import {
   setCsrfToken,
   switchCloudflareAccount,
 } from "../api.js";
-import { resetCloudflareAccountData, resetSessionState, state } from "../state.js";
+import { resetCloudflareAccountData, resetPendingResourceState, resetSessionState, state } from "../state.js";
+import { captureRequestContext, invalidateReadRequests } from "../request-scope.js";
 
 function readConnectForm() {
   const form = document.querySelector("#cloudflare-connect-form");
@@ -501,25 +502,51 @@ export function createSessionActions({ loadZones, renderApp }) {
   async function changeCloudflareAccount(event) {
     const accountId = String(event?.target?.value || "").trim();
 
-    if (!accountId || accountId === state.activeCloudflareAccountId) {
+    if (state.selectingCloudflareAccount || !accountId || accountId === state.activeCloudflareAccountId) {
       return;
     }
 
     state.selectingCloudflareAccount = true;
+    invalidateReadRequests();
+    resetPendingResourceState();
+    let request = captureRequestContext(() => "", { navigation: false });
     state.sessionError = "";
     renderApp();
 
     try {
       const session = await switchCloudflareAccount(accountId);
+      if (!request.isCurrent()) return;
       applySession(session);
       resetCloudflareAccountData();
+      request = captureRequestContext(() => "", { navigation: false });
       state.connected = true;
       await loadZones({ throwOnError: true });
     } catch (error) {
+      if (!request.isCurrent()) return;
       state.sessionError = error.message;
-    } finally {
       state.selectingCloudflareAccount = false;
-      renderApp();
+      try {
+        const session = await fetchSessionStatus();
+        if (!request.isCurrent()) return;
+        const accountChanged = session.activeCloudflareAccount?.id !== state.activeCloudflareAccountId;
+        applySession(session);
+        resetCloudflareAccountData();
+        if (accountChanged) history.replaceState(null, "", location.pathname);
+        request = captureRequestContext(() => "", { navigation: false });
+        state.connected = Boolean(session.authenticated && session.hasCredentials);
+        if (state.connected) await loadZones({ throwOnError: false });
+      } catch {
+        if (!request.isCurrent()) return;
+        resetCloudflareAccountData();
+        state.connected = false;
+        state.sessionError = "切换结果未确认，暂时无法读取登录状态，请刷新页面后继续。";
+        renderApp();
+      }
+    } finally {
+      if (request.isCurrent()) {
+        state.selectingCloudflareAccount = false;
+        renderApp();
+      }
     }
   }
 
