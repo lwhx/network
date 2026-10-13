@@ -14,6 +14,10 @@ function assertCloudflareId(value, label, pattern = zoneIdPattern) {
 }
 
 function normalizeRecordInput(input, { partial = false } = {}) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new HttpError(400, "DNS 记录必须是有效的对象");
+  }
+
   const record = {};
   const type = String(input.type || "").trim().toUpperCase();
 
@@ -90,6 +94,72 @@ function sameDnsValue(left, right) {
   return String(left ?? "").trim().toLowerCase() === String(right ?? "").trim().toLowerCase();
 }
 
+function validateCreateInputs(inputs) {
+  if (!Array.isArray(inputs) || inputs.length === 0) {
+    throw new HttpError(400, "请至少提供一条 DNS 记录");
+  }
+
+  if (inputs.length > maxBulkRecords) {
+    throw new HttpError(400, `单次最多批量添加 ${maxBulkRecords} 条 DNS 记录`);
+  }
+
+  return inputs.map((input) => normalizeRecordInput(input));
+}
+
+function validateDeleteIds(recordIds) {
+  if (!Array.isArray(recordIds) || recordIds.length === 0) {
+    throw new HttpError(400, "请选择要删除的 DNS 记录");
+  }
+
+  if (recordIds.length > maxBulkRecords) {
+    throw new HttpError(400, `单次最多批量删除 ${maxBulkRecords} 条 DNS 记录`);
+  }
+
+  return recordIds.map((recordId) => {
+    const normalizedId = String(recordId || "").trim();
+    assertCloudflareId(normalizedId, "DNS 记录 ID", recordIdPattern);
+    return normalizedId;
+  });
+}
+
+function bulkSummary(results) {
+  const summary = { total: results.length, succeeded: 0, failed: 0, unknown: 0, skipped: 0 };
+
+  for (const { status } of results) {
+    summary[status === "success" ? "succeeded" : status] += 1;
+  }
+
+  return summary;
+}
+
+function bulkFailure(error) {
+  const unknown = Boolean(error?.remoteOutcomeUnknown);
+  return {
+    status: unknown ? "unknown" : "failed",
+    error: error?.message || "DNS 操作失败，请稍后重试。",
+    retryable: !unknown,
+  };
+}
+
+function skippedOperation() {
+  return {
+    status: "skipped",
+    error: "前一条操作结果未知，已停止后续操作。请先刷新并核对 DNS 记录。",
+    retryable: true,
+  };
+}
+
+function assertDnsWriteResult(result, fields = ["id"]) {
+  if (
+    !result || typeof result !== "object" || Array.isArray(result) ||
+    fields.some((field) => typeof result[field] !== "string" || !result[field].trim())
+  ) {
+    const error = new HttpError(502, "Cloudflare DNS 操作返回格式异常，结果未知。请先刷新并核对 DNS 记录。");
+    error.remoteOutcomeUnknown = true;
+    throw error;
+  }
+}
+
 export class DnsRecordsService {
   constructor({ cloudflareClient, perPage = 100 }) {
     this.cloudflareClient = cloudflareClient;
@@ -135,27 +205,47 @@ export class DnsRecordsService {
       normalizeRecordInput(input)
     );
 
+    assertDnsWriteResult(payload?.result, ["id", "type", "name", "content"]);
     return normalizeDnsRecord(payload.result);
   }
 
   async createRecords(zoneId, inputs = []) {
     assertCloudflareId(zoneId, "区域 ID");
-
-    if (!Array.isArray(inputs) || inputs.length === 0) {
-      throw new HttpError(400, "请至少提供一条 DNS 记录");
-    }
-
-    if (inputs.length > maxBulkRecords) {
-      throw new HttpError(400, `单次最多批量添加 ${maxBulkRecords} 条 DNS 记录`);
-    }
-
+    const normalizedInputs = validateCreateInputs(inputs);
     const records = [];
 
-    for (const input of inputs) {
+    for (const input of normalizedInputs) {
       records.push(await this.createRecord(zoneId, input));
     }
 
     return records;
+  }
+
+  async createRecordsDetailed(zoneId, inputs = []) {
+    assertCloudflareId(zoneId, "区域 ID");
+    const normalizedInputs = validateCreateInputs(inputs);
+    const records = [];
+    const results = [];
+    let stopped = false;
+
+    for (const [index, input] of normalizedInputs.entries()) {
+      if (stopped) {
+        results.push({ index, input, ...skippedOperation() });
+        continue;
+      }
+
+      try {
+        const record = await this.createRecord(zoneId, input);
+        records.push(record);
+        results.push({ index, input, status: "success", record, retryable: false });
+      } catch (error) {
+        const failure = bulkFailure(error);
+        results.push({ index, input, ...failure });
+        stopped = failure.status === "unknown";
+      }
+    }
+
+    return { records, results, summary: bulkSummary(results) };
   }
 
   async upsertCnameRecord(zoneId, input = {}) {
@@ -223,26 +313,17 @@ export class DnsRecordsService {
       `zones/${zoneId}/dns_records/${recordId}`
     );
 
-    return { id: payload.result?.id || recordId };
+    if (payload?.httpStatus === 204) {
+      return { id: recordId };
+    }
+
+    assertDnsWriteResult(payload?.result);
+    return { id: payload.result.id };
   }
 
   async deleteRecords(zoneId, recordIds = []) {
     assertCloudflareId(zoneId, "区域 ID");
-
-    if (!Array.isArray(recordIds) || recordIds.length === 0) {
-      throw new HttpError(400, "请选择要删除的 DNS 记录");
-    }
-
-    if (recordIds.length > maxBulkRecords) {
-      throw new HttpError(400, `单次最多批量删除 ${maxBulkRecords} 条 DNS 记录`);
-    }
-
-    const uniqueRecordIds = [...new Set(recordIds.map((recordId) => String(recordId || "").trim()))];
-
-    for (const recordId of uniqueRecordIds) {
-      assertCloudflareId(recordId, "DNS 记录 ID", recordIdPattern);
-    }
-
+    const uniqueRecordIds = [...new Set(validateDeleteIds(recordIds))];
     const deleted = [];
 
     for (const recordId of uniqueRecordIds) {
@@ -250,5 +331,39 @@ export class DnsRecordsService {
     }
 
     return deleted;
+  }
+
+  async deleteRecordsDetailed(zoneId, recordIds = []) {
+    assertCloudflareId(zoneId, "区域 ID");
+    const normalizedIds = validateDeleteIds(recordIds);
+    const deleted = [];
+    const results = [];
+    const outcomes = new Map();
+    let stopped = false;
+
+    for (const [index, recordId] of normalizedIds.entries()) {
+      let outcome = outcomes.get(recordId);
+
+      if (!outcome) {
+        if (stopped) {
+          outcome = skippedOperation();
+        } else {
+          try {
+            const result = await this.deleteRecord(zoneId, recordId);
+            deleted.push(result);
+            outcome = { status: "success", result, retryable: false };
+          } catch (error) {
+            outcome = bulkFailure(error);
+            stopped = outcome.status === "unknown";
+          }
+        }
+
+        outcomes.set(recordId, outcome);
+      }
+
+      results.push({ index, recordId, ...outcome });
+    }
+
+    return { deleted, results, summary: bulkSummary(results) };
   }
 }

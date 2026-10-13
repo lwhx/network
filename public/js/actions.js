@@ -1,4 +1,5 @@
 import { createLoginSettingsActions } from "./actions/login-settings-actions.js";
+import { createAccountManagementActions } from "./actions/account-management-actions.js";
 import { createAnalyticsActions } from "./actions/analytics-actions.js";
 import { createAutomationActions } from "./actions/automation-actions.js";
 import { createDeveloperResourcesActions } from "./actions/developer-resources-actions.js";
@@ -11,7 +12,8 @@ import { createSpeedActions } from "./actions/speed-actions.js";
 import { createWorkersActions } from "./actions/workers-actions.js";
 import { createZoneSettingsActions } from "./actions/zone-settings-actions.js";
 import { backToDomains, routeToZoneSection, updateRoute } from "./router.js";
-import { resetDnsForm, resetFirewallForm, resetPageRuleForm, state } from "./state.js";
+import { resetDnsForm, resetFirewallForm, resetPageRuleForm, resetPendingResourceState, state } from "./state.js";
+import { invalidateReadRequests } from "./request-scope.js";
 
 export function createActions({ renderApp }) {
   const noticeActions = createNoticeActions({ renderApp });
@@ -71,6 +73,10 @@ export function createActions({ renderApp }) {
   });
 
   async function handleRouteChange() {
+    invalidateReadRequests({ navigationOnly: true });
+    resetPendingResourceState();
+    state.notice = "";
+    state.dnsBulkResult = null;
     updateRoute();
 
     if (state.view === "zone") {
@@ -93,6 +99,10 @@ export function createActions({ renderApp }) {
   }
 
   async function openMainSection(section) {
+    if (state.mainSection !== section || state.view === "zone") {
+      invalidateReadRequests({ navigationOnly: true });
+      resetPendingResourceState();
+    }
     domainActions.openMainSection(section);
     await automationActions.ensureAutomationLoaded();
     await developerResourcesActions.ensureDeveloperResourcesLoaded();
@@ -101,6 +111,7 @@ export function createActions({ renderApp }) {
   }
 
   return {
+    ...createAccountManagementActions({ renderApp, loadZones: domainActions.loadZones }),
     ...createLoginSettingsActions({ renderApp }),
     ...analyticsActions,
     ...automationActions,
@@ -112,7 +123,11 @@ export function createActions({ renderApp }) {
     ...speedActions,
     ...workersActions,
     ...zoneSettingsActions,
-    backToDomains,
+    backToDomains: () => {
+      invalidateReadRequests({ navigationOnly: true });
+      resetPendingResourceState();
+      backToDomains();
+    },
     handleRouteChange,
     openMainSection,
     openZoneSection: routeToZoneSection,

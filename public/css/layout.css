@@ -246,12 +246,28 @@
 }
 
 .account-dialog {
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
   width: min(100%, 440px);
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: #fff;
   box-shadow: 0 24px 80px rgba(15, 23, 42, 0.18);
   padding: 18px;
+}
+
+.account-manager { width: min(100%, 560px); }
+.account-manager-list { display: grid; gap: 8px; margin-bottom: 16px; }
+.account-manager-row { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line-strong); }
+.account-manager-row strong, .account-manager-row span { display: block; overflow-wrap: anywhere; }
+.account-manager-row span { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.account-manager-row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.account-manager .account-dialog-actions { flex-wrap: wrap; }
+.dns-bulk-results { margin-bottom: 16px; overflow: auto; }
+.dns-bulk-results td { overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .account-manager-row { flex-wrap: wrap; }
+  .dns-bulk-results .dns-record-title { flex-wrap: wrap; gap: 12px; }
 }
 
 .account-dialog-head {

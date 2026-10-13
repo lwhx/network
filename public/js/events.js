@@ -1,4 +1,11 @@
 export function bindEvents(actions) {
+  document.querySelector("#cloudflare-account-manage")?.addEventListener("click", actions.openAccountManager);
+  document.querySelectorAll(".account-manager-close").forEach((button) => button.addEventListener("click", actions.closeAccountManager));
+  document.querySelectorAll(".cloudflare-account-edit").forEach((button) => button.addEventListener("click", () => actions.editManagedCloudflareAccount(button.dataset.accountId)));
+  document.querySelectorAll(".cloudflare-account-delete").forEach((button) => button.addEventListener("click", () => actions.deleteManagedCloudflareAccount(button.dataset.accountId)));
+  document.querySelector("#cloudflare-account-edit-form")?.addEventListener("submit", actions.saveManagedCloudflareAccount);
+  document.querySelector("#cloudflare-account-test")?.addEventListener("click", actions.testManagedCloudflareAccount);
+  document.querySelector("#dns-bulk-retry")?.addEventListener("click", actions.retryDnsBulk);
   document.querySelector("#setup-use-2fa")?.addEventListener("change", actions.toggleSetupTwoFactor);
   document.querySelector("#login-settings-open")?.addEventListener("click", actions.openLoginSettings);
   document.querySelector("#login-settings-2fa")?.addEventListener("change", actions.toggleLoginSettings);

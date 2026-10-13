@@ -1,5 +1,6 @@
 import { clearOperationHistory, fetchOperationHistory } from "../api.js";
 import { state } from "../state.js";
+import { beginScopedRequest, captureRequestContext } from "../request-scope.js";
 
 function historyQuery() {
   return {
@@ -17,19 +18,34 @@ function applyHistoryPayload(payload = {}) {
   };
 }
 
+function readHistoryContext() {
+  return JSON.stringify([state.view, state.mainSection, historyQuery()]);
+}
+
 export function createHistoryActions({ renderApp }) {
-  async function loadOperationHistory() {
+  async function loadOperationHistory(notice = "") {
     state.operationHistoryLoading = true;
-    state.operationHistoryNotice = "";
+    state.operationHistoryNotice = notice;
     renderApp();
 
+    const requestScope = beginScopedRequest("history:loadOperationHistory", readHistoryContext);
+
     try {
-      applyHistoryPayload(await fetchOperationHistory(historyQuery()));
+      const payload = await fetchOperationHistory(historyQuery());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      applyHistoryPayload(payload);
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.operationHistoryNotice = error.message;
     } finally {
-      state.operationHistoryLoading = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.operationHistoryLoading = false;
+        renderApp();
+      }
     }
   }
 
@@ -61,13 +77,19 @@ export function createHistoryActions({ renderApp }) {
     state.operationHistoryNotice = "";
     renderApp();
 
+    const requestScope = captureRequestContext(readHistoryContext);
+
     try {
       const result = await clearOperationHistory();
-      state.operationHistoryNotice = `已清空 ${result.deleted || 0} 条操作记录`;
-      applyHistoryPayload(await fetchOperationHistory(historyQuery()));
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      await loadOperationHistory(`已清空 ${result.deleted || 0} 条操作记录`);
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.operationHistoryNotice = error.message;
-    } finally {
       state.operationHistoryLoading = false;
       renderApp();
     }

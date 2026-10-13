@@ -15,11 +15,15 @@ import {
   saveTunnelConfiguration,
 } from "../api.js";
 import { state } from "../state.js";
+import { beginScopedRequest, captureRequestContext } from "../request-scope.js";
 
 const cloudflareResourceTypes = new Set(["pages", "d1", "r2", "kv", "tunnels"]);
 const templatesStorageKey = "cloudflare-panel-worker-templates";
 
 const builtinTemplateIds = new Set(["hello-world", "json-api", "cache-proxy"]);
+
+let resourceDetailRevision = 0;
+let resourceModalRevision = 0;
 
 function activeType() {
   return state.mainSection;
@@ -43,6 +47,7 @@ function applyResourcePayload(payload = {}) {
 }
 
 function resetResourceModal() {
+  resourceModalRevision += 1;
   state.developerResourceModal = "";
   state.developerResourceDeleteId = "";
   state.developerResourceDeleteName = "";
@@ -51,6 +56,7 @@ function resetResourceModal() {
 }
 
 function clearResourceDetail() {
+  resourceDetailRevision += 1;
   state.developerResourceActiveId = "";
   state.developerResourceDetail = null;
   state.developerResourceDetailLoading = false;
@@ -105,6 +111,22 @@ function allTemplates() {
   ];
 }
 
+function readResourceContext() {
+  return JSON.stringify([state.view, activeType(), activeAccountId()]);
+}
+
+function readResourceDetailContext() {
+  return JSON.stringify([readResourceContext(), resourceDetailRevision, state.developerResourceActiveId]);
+}
+
+function readResourceModalContext() {
+  return JSON.stringify([readResourceContext(), resourceModalRevision, state.developerResourceModal, state.developerResourceDeleteId]);
+}
+
+function readKvContext() {
+  return JSON.stringify([readResourceDetailContext(), state.developerResourceKvKey]);
+}
+
 export function createDeveloperResourcesActions({ renderApp }) {
   async function ensureDeveloperResourcesLoaded() {
     const type = activeType();
@@ -136,16 +158,27 @@ export function createDeveloperResourcesActions({ renderApp }) {
     }
 
     state.developerResourceType = type;
+    clearResourceDetail();
     state.developerResourceLoading = true;
     state.developerResourceNotice = "";
     renderApp();
 
+    const requestScope = beginScopedRequest("developer-resources:loadDeveloperResources", readResourceContext);
+
     try {
-      applyResourcePayload(await fetchDeveloperResources(type, activeAccountId()));
-      clearResourceDetail();
+      const payload = await fetchDeveloperResources(type, activeAccountId());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      // Selecting the initial account changes the context after accepting this response.
+      state.developerResourceLoading = false;
+      applyResourcePayload(payload);
+      renderApp();
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceNotice = error.message;
-    } finally {
       state.developerResourceLoading = false;
       renderApp();
     }
@@ -159,6 +192,7 @@ export function createDeveloperResourcesActions({ renderApp }) {
   }
 
   function openDeveloperResourceCreateModal() {
+    resourceModalRevision += 1;
     state.developerResourceModal = "create";
     state.developerResourceNotice = "";
     renderApp();
@@ -176,6 +210,7 @@ export function createDeveloperResourcesActions({ renderApp }) {
       return;
     }
 
+    resourceDetailRevision += 1;
     state.developerResourceActiveId = resourceId;
     state.developerResourceDetail = null;
     state.developerResourceDetailLoading = true;
@@ -183,17 +218,28 @@ export function createDeveloperResourcesActions({ renderApp }) {
     state.developerResourceTunnelToken = null;
     renderApp();
 
+    const requestScope = beginScopedRequest("developer-resources:openDeveloperResourceDetail", readResourceDetailContext);
+
     try {
-      state.developerResourceDetail = await fetchDeveloperResourceDetail(
+      const payload = await fetchDeveloperResourceDetail(
         type,
         resourceId,
         activeAccountId()
       );
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      state.developerResourceDetail = payload;
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = error.message;
     } finally {
-      state.developerResourceDetailLoading = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.developerResourceDetailLoading = false;
+        renderApp();
+      }
     }
   }
 
@@ -209,6 +255,8 @@ export function createDeveloperResourcesActions({ renderApp }) {
     state.developerResourceDetailLoading = true;
     renderApp();
 
+    const requestScope = captureRequestContext(readResourceDetailContext);
+
     try {
       await savePagesBuildConfig(state.developerResourceActiveId, {
         accountId: activeAccountId(),
@@ -217,13 +265,24 @@ export function createDeveloperResourcesActions({ renderApp }) {
         destinationDir: String(formData.get("destinationDir") || "").trim(),
         rootDir: String(formData.get("rootDir") || "").trim(),
       });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = "Pages 构建配置已保存";
       await openDeveloperResourceDetail(state.developerResourceActiveId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = error.message;
     } finally {
-      state.developerResourceDetailLoading = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.developerResourceDetailLoading = false;
+        renderApp();
+      }
     }
   }
 
@@ -234,11 +293,16 @@ export function createDeveloperResourcesActions({ renderApp }) {
     state.developerResourceDetailLoading = true;
     renderApp();
 
+    const requestScope = captureRequestContext(readResourceDetailContext);
+
     try {
       const result = await queryD1Database(state.developerResourceActiveId, {
         accountId: activeAccountId(),
         sql: state.developerResourceSqlDraft,
       });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetail = {
         ...state.developerResourceDetail,
         extras: {
@@ -248,10 +312,15 @@ export function createDeveloperResourcesActions({ renderApp }) {
       };
       state.developerResourceDetailNotice = "D1 查询已执行";
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = error.message;
     } finally {
-      state.developerResourceDetailLoading = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.developerResourceDetailLoading = false;
+        renderApp();
+      }
     }
   }
 
@@ -263,6 +332,8 @@ export function createDeveloperResourcesActions({ renderApp }) {
     state.developerResourceDetailLoading = true;
     renderApp();
 
+    const requestScope = captureRequestContext(readResourceDetailContext);
+
     try {
       await putR2Object(state.developerResourceActiveId, {
         accountId: activeAccountId(),
@@ -270,13 +341,24 @@ export function createDeveloperResourcesActions({ renderApp }) {
         content,
         contentType: "text/plain; charset=utf-8",
       });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = "R2 对象已上传";
       await openDeveloperResourceDetail(state.developerResourceActiveId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = error.message;
     } finally {
-      state.developerResourceDetailLoading = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.developerResourceDetailLoading = false;
+        renderApp();
+      }
     }
   }
 
@@ -285,11 +367,22 @@ export function createDeveloperResourcesActions({ renderApp }) {
       return;
     }
 
+    const requestScope = captureRequestContext(readResourceDetailContext);
+
     try {
       await removeR2Object(state.developerResourceActiveId, key, activeAccountId());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = "R2 对象已删除";
       await openDeveloperResourceDetail(state.developerResourceActiveId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = error.message;
       renderApp();
     }
@@ -304,15 +397,25 @@ export function createDeveloperResourcesActions({ renderApp }) {
     state.developerResourceDetailLoading = true;
     renderApp();
 
+    const requestScope = beginScopedRequest("developer-resources:readKvValue", readKvContext);
+
     try {
       const value = await fetchKvValue(state.developerResourceActiveId, key, activeAccountId());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceKvValue = value.value || "";
       state.developerResourceDetailNotice = "KV Value 已读取";
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = error.message;
     } finally {
-      state.developerResourceDetailLoading = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.developerResourceDetailLoading = false;
+        renderApp();
+      }
     }
   }
 
@@ -322,15 +425,26 @@ export function createDeveloperResourcesActions({ renderApp }) {
     const key = String(formData.get("key") || "").trim();
     const value = String(formData.get("value") || "");
 
+    const requestScope = captureRequestContext(readResourceDetailContext);
+
     try {
       await putKvValue(state.developerResourceActiveId, {
         accountId: activeAccountId(),
         key,
         value,
       });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = "KV Value 已保存";
       await openDeveloperResourceDetail(state.developerResourceActiveId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = error.message;
       renderApp();
     }
@@ -341,11 +455,22 @@ export function createDeveloperResourcesActions({ renderApp }) {
       return;
     }
 
+    const requestScope = captureRequestContext(readResourceDetailContext);
+
     try {
       await removeKvValue(state.developerResourceActiveId, key, activeAccountId());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = "KV Key 已删除";
       await openDeveloperResourceDetail(state.developerResourceActiveId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = error.message;
       renderApp();
     }
@@ -355,15 +480,26 @@ export function createDeveloperResourcesActions({ renderApp }) {
     event.preventDefault();
     const formData = readForm("#tunnel-config-form");
 
+    const requestScope = captureRequestContext(readResourceDetailContext);
+
     try {
       const config = JSON.parse(String(formData.get("config") || "{}"));
       await saveTunnelConfiguration(state.developerResourceActiveId, {
         accountId: activeAccountId(),
         config,
       });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = "Tunnel 配置已保存";
       await openDeveloperResourceDetail(state.developerResourceActiveId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = error.message;
       renderApp();
     }
@@ -373,17 +509,28 @@ export function createDeveloperResourcesActions({ renderApp }) {
     state.developerResourceDetailLoading = true;
     renderApp();
 
+    const requestScope = beginScopedRequest("developer-resources:loadTunnelToken", readResourceDetailContext);
+
     try {
-      state.developerResourceTunnelToken = await fetchTunnelToken(
+      const payload = await fetchTunnelToken(
         state.developerResourceActiveId,
         activeAccountId()
       );
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      state.developerResourceTunnelToken = payload;
       state.developerResourceDetailNotice = "Tunnel Token 已读取";
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceDetailNotice = error.message;
     } finally {
-      state.developerResourceDetailLoading = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.developerResourceDetailLoading = false;
+        renderApp();
+      }
     }
   }
 
@@ -408,20 +555,35 @@ export function createDeveloperResourcesActions({ renderApp }) {
     state.developerResourceSaving = true;
     renderApp();
 
+    let requestScope = captureRequestContext(readResourceModalContext);
+
     try {
       await createDeveloperResource(type, request);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       resetResourceModal();
+      requestScope = captureRequestContext(readResourceModalContext);
       await loadDeveloperResources();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceNotice = "资源已创建";
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceNotice = error.message;
     } finally {
-      state.developerResourceSaving = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.developerResourceSaving = false;
+        renderApp();
+      }
     }
   }
 
   function requestDeleteDeveloperResource(resourceId, resourceName) {
+    resourceModalRevision += 1;
     state.developerResourceModal = "delete";
     state.developerResourceDeleteId = resourceId || "";
     state.developerResourceDeleteName = resourceName || resourceId || "";
@@ -450,20 +612,34 @@ export function createDeveloperResourcesActions({ renderApp }) {
     state.developerResourceSaving = true;
     renderApp();
 
+    let requestScope = captureRequestContext(readResourceModalContext);
+
     try {
       await removeDeveloperResource(
         type,
         state.developerResourceDeleteId,
         activeAccountId()
       );
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       resetResourceModal();
+      requestScope = captureRequestContext(readResourceModalContext);
       await loadDeveloperResources();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceNotice = "资源已删除";
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.developerResourceNotice = error.message;
     } finally {
-      state.developerResourceSaving = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.developerResourceSaving = false;
+        renderApp();
+      }
     }
   }
 
@@ -565,13 +741,23 @@ export function createDeveloperResourcesActions({ renderApp }) {
     state.workerTemplateNotice = "正在创建 Worker...";
     renderApp();
 
+    const requestScope = captureRequestContext(readResourceContext);
+
     try {
       await createWorker({ name: name.trim().toLowerCase(), script: template.script });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.workerTemplateNotice = `Worker "${name}" 已创建`;
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.workerTemplateNotice = error.message;
     } finally {
-      renderApp();
+      if (requestScope.isCurrent()) {
+        renderApp();
+      }
     }
   }
 

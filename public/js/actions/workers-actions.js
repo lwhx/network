@@ -18,10 +18,13 @@ import {
   saveWorkerSubdomain,
 } from "../api.js";
 import { state } from "../state.js";
+import { beginScopedRequest, captureRequestContext } from "../request-scope.js";
 
 const defaultWorkerScript = `addEventListener('fetch', event => {
   event.respondWith(new Response('Hello World!'));
 });`;
+
+let workerDetailRevision = 0;
 
 function firstZoneId() {
   return state.zones[0]?.id || "";
@@ -91,6 +94,7 @@ function normalizePreferredPattern(value) {
 }
 
 function resetModalState() {
+  workerDetailRevision += 1;
   state.workersModal = "";
   state.workersActiveName = "";
   state.workersActiveTab = "code";
@@ -120,6 +124,30 @@ function validateWorkerName(name) {
   return "";
 }
 
+function readWorkersContext() {
+  return JSON.stringify([state.view, state.mainSection, activeAccountId()]);
+}
+
+function readWorkerContext() {
+  return JSON.stringify([readWorkersContext(), workerDetailRevision, state.workersModal, activeWorkerName()]);
+}
+
+function readWorkerDeleteContext() {
+  return JSON.stringify([readWorkerContext(), state.workersDeleteName]);
+}
+
+function readWorkerRouteContext() {
+  return JSON.stringify([readWorkerContext(), selectedRouteZoneId()]);
+}
+
+function readWorkerDomainContext() {
+  return JSON.stringify([readWorkerContext(), selectedDomainZoneId()]);
+}
+
+function readWorkerPreferredContext() {
+  return JSON.stringify([readWorkerContext(), selectedPreferredZoneId()]);
+}
+
 export function createWorkersActions({ renderApp }) {
   async function ensureWorkersLoaded() {
     if (state.mainSection !== "workers" || state.view !== "domains") {
@@ -136,11 +164,22 @@ export function createWorkersActions({ renderApp }) {
     state.workersNotice = "";
     renderApp();
 
+    const requestScope = beginScopedRequest("workers:loadWorkers", readWorkersContext);
+
     try {
-      applyWorkersPayload(await fetchWorkers(activeAccountId()));
+      const payload = await fetchWorkers(activeAccountId());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      // The response can select the initial account, changing the request context.
+      state.workersLoading = false;
+      applyWorkersPayload(payload);
+      renderApp();
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
-    } finally {
       state.workersLoading = false;
       renderApp();
     }
@@ -154,6 +193,7 @@ export function createWorkersActions({ renderApp }) {
   }
 
   function openCreateWorkerModal() {
+    workerDetailRevision += 1;
     state.workersModal = "create";
     state.workersActiveName = "";
     state.workersActiveDetail = null;
@@ -189,16 +229,30 @@ export function createWorkersActions({ renderApp }) {
     state.workersSaving = true;
     renderApp();
 
+    let requestScope = captureRequestContext(readWorkerContext);
+
     try {
       await createWorker({ accountId: activeAccountId(), name, script });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       resetModalState();
+      requestScope = captureRequestContext(readWorkerContext);
       await loadWorkers();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(`Worker "${name}" 创建成功。若 Cloudflare 显示“非活动”，表示未绑定到域，但已可通过 workers.dev 访问。`);
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersSaving = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersSaving = false;
+        renderApp();
+      }
     }
   }
 
@@ -207,6 +261,7 @@ export function createWorkersActions({ renderApp }) {
       return;
     }
 
+    workerDetailRevision += 1;
     state.workersModal = "edit";
     state.workersActiveName = workerName;
     state.workersActiveTab = tab;
@@ -220,17 +275,31 @@ export function createWorkersActions({ renderApp }) {
     state.workersNotice = "";
     renderApp();
 
+    const requestScope = beginScopedRequest("workers:openEditWorker", readWorkerContext);
+
     try {
-      state.workersActiveDetail = await fetchWorker(workerName, activeAccountId());
+      const payload = await fetchWorker(workerName, activeAccountId());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      state.workersActiveDetail = payload;
       state.workersScript = state.workersActiveDetail.script || "";
       if (state.workersActiveTab === "domain") {
         await loadWorkerRoutes({ render: false });
+        if (!requestScope.isCurrent()) {
+          return;
+        }
       }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersLoadingDetail = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersLoadingDetail = false;
+        renderApp();
+      }
     }
   }
 
@@ -257,19 +326,32 @@ export function createWorkersActions({ renderApp }) {
     state.workersSaving = true;
     renderApp();
 
+    const requestScope = captureRequestContext(readWorkerContext);
+
     try {
       const payload = await saveWorkerScript(activeWorkerName(), {
         accountId: activeAccountId(),
         script,
       });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.workersScript = script;
       await loadWorkers();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(`Worker "${payload.worker?.name || activeWorkerName()}" 已保存并部署`);
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersSaving = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersSaving = false;
+        renderApp();
+      }
     }
   }
 
@@ -279,22 +361,32 @@ export function createWorkersActions({ renderApp }) {
     state.workersPendingKey = "subdomain";
     renderApp();
 
+    const requestScope = captureRequestContext(readWorkerContext);
+
     try {
       const payload = await saveWorkerSubdomain(activeWorkerName(), {
         accountId: activeAccountId(),
         enabled,
         previewsEnabled: enabled,
       });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.workersActiveDetail = {
         ...state.workersActiveDetail,
         subdomain: payload.subdomain,
       };
       setNotice(enabled ? "workers.dev 子域已启用" : "workers.dev 子域已禁用");
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersPendingKey = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersPendingKey = "";
+        renderApp();
+      }
     }
   }
 
@@ -311,14 +403,25 @@ export function createWorkersActions({ renderApp }) {
       renderApp();
     }
 
+    const requestScope = beginScopedRequest("workers:loadWorkerRoutes", readWorkerRouteContext);
+
     try {
-      state.workersRoutes = await fetchWorkerRoutes(activeWorkerName(), zoneId);
+      const payload = await fetchWorkerRoutes(activeWorkerName(), zoneId);
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      state.workersRoutes = payload;
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersRoutesLoading = false;
-      if (render) {
-        renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersRoutesLoading = false;
+        if (render) {
+          renderApp();
+        }
       }
     }
   }
@@ -371,21 +474,31 @@ export function createWorkersActions({ renderApp }) {
     state.workersPendingKey = "binding";
     renderApp();
 
+    const requestScope = captureRequestContext(readWorkerContext);
+
     try {
       const payload = await saveWorkerSettings(activeWorkerName(), {
         accountId: activeAccountId(),
         bindings: [binding, ...currentBindings.filter((item) => item.name !== name)],
       });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.workersActiveDetail = {
         ...state.workersActiveDetail,
         settings: payload.settings,
       };
       setNotice("Worker 绑定已保存");
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersPendingKey = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersPendingKey = "";
+        renderApp();
+      }
     }
   }
 
@@ -398,22 +511,32 @@ export function createWorkersActions({ renderApp }) {
     state.workersPendingKey = "secret";
     renderApp();
 
+    const requestScope = captureRequestContext(readWorkerContext);
+
     try {
       const secret = await saveWorkerSecret(activeWorkerName(), {
         accountId: activeAccountId(),
         name,
         value,
       });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.workersActiveDetail = {
         ...state.workersActiveDetail,
         secrets: [secret, ...(state.workersActiveDetail?.secrets || []).filter((item) => item.name !== name)],
       };
       setNotice("Worker Secret 已保存");
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersPendingKey = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersPendingKey = "";
+        renderApp();
+      }
     }
   }
 
@@ -425,8 +548,13 @@ export function createWorkersActions({ renderApp }) {
     state.workersPendingKey = "secret";
     renderApp();
 
+    const requestScope = captureRequestContext(readWorkerContext);
+
     try {
       await removeWorkerSecret(activeWorkerName(), secretName, activeAccountId());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.workersActiveDetail = {
         ...state.workersActiveDetail,
         secrets: (state.workersActiveDetail?.secrets || []).filter(
@@ -435,10 +563,15 @@ export function createWorkersActions({ renderApp }) {
       };
       setNotice("Worker Secret 已删除");
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersPendingKey = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersPendingKey = "";
+        renderApp();
+      }
     }
   }
 
@@ -453,21 +586,31 @@ export function createWorkersActions({ renderApp }) {
     state.workersPendingKey = "cron";
     renderApp();
 
+    const requestScope = captureRequestContext(readWorkerContext);
+
     try {
       const payload = await saveWorkerSchedules(activeWorkerName(), {
         accountId: activeAccountId(),
         schedules,
       });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.workersActiveDetail = {
         ...state.workersActiveDetail,
         schedules: payload.schedules,
       };
       setNotice("Cron Triggers 已保存");
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersPendingKey = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersPendingKey = "";
+        renderApp();
+      }
     }
   }
 
@@ -475,14 +618,25 @@ export function createWorkersActions({ renderApp }) {
     state.workersPendingKey = "tail";
     renderApp();
 
+    const requestScope = captureRequestContext(readWorkerContext);
+
     try {
-      state.workersTailInfo = await createWorkerTail(activeWorkerName(), activeAccountId());
+      const payload = await createWorkerTail(activeWorkerName(), activeAccountId());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
+      state.workersTailInfo = payload;
       setNotice("Worker Tail 会话已创建");
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersPendingKey = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersPendingKey = "";
+        renderApp();
+      }
     }
   }
 
@@ -501,19 +655,32 @@ export function createWorkersActions({ renderApp }) {
     state.workersPendingKey = "route";
     renderApp();
 
+    const requestScope = captureRequestContext(readWorkerRouteContext);
+
     try {
       await createWorkerRoute(activeWorkerName(), {
         zoneId,
         zoneName: zoneName(zoneId),
         pattern,
       });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice("路由已添加");
       await loadWorkerRoutes({ render: false });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersPendingKey = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersPendingKey = "";
+        renderApp();
+      }
     }
   }
 
@@ -544,6 +711,8 @@ export function createWorkersActions({ renderApp }) {
     state.workersPendingKey = "preferred-route";
     renderApp();
 
+    const requestScope = captureRequestContext(readWorkerPreferredContext);
+
     try {
       const deployment = await createWorkerPreferredRoute(activeWorkerName(), {
         zoneId,
@@ -551,17 +720,28 @@ export function createWorkersActions({ renderApp }) {
         pattern,
         preferredHostname,
       });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.workersRouteZoneId = zoneId;
       state.workersPreferredZoneId = zoneId;
       state.workersPreferredPattern = "";
       state.workersPreferredHostname = deployment.preferredHostname || preferredHostname;
       setNotice(`Worker 优选已添加：${deployment.routePattern}，CNAME 指向 ${deployment.preferredHostname}`);
       await loadWorkerRoutes({ render: false });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersPendingKey = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersPendingKey = "";
+        renderApp();
+      }
     }
   }
 
@@ -573,15 +753,25 @@ export function createWorkersActions({ renderApp }) {
     state.workersPendingKey = "route";
     renderApp();
 
+    const requestScope = captureRequestContext(readWorkerRouteContext);
+
     try {
       await removeWorkerRoute(activeWorkerName(), routeId, selectedRouteZoneId());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.workersRoutes = state.workersRoutes.filter((route) => route.id !== routeId);
       setNotice("路由已删除");
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersPendingKey = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersPendingKey = "";
+        renderApp();
+      }
     }
   }
 
@@ -600,6 +790,8 @@ export function createWorkersActions({ renderApp }) {
     state.workersPendingKey = "domain";
     renderApp();
 
+    const requestScope = captureRequestContext(readWorkerDomainContext);
+
     try {
       const domain = await createWorkerDomain(activeWorkerName(), {
         accountId: activeAccountId(),
@@ -607,17 +799,28 @@ export function createWorkersActions({ renderApp }) {
         zoneName: zoneName(zoneId),
         hostname,
       });
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.workersActiveDetail = {
         ...state.workersActiveDetail,
         domains: [domain, ...(state.workersActiveDetail?.domains || [])],
       };
       await loadWorkers();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice("自定义域已添加");
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersPendingKey = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersPendingKey = "";
+        renderApp();
+      }
     }
   }
 
@@ -629,8 +832,13 @@ export function createWorkersActions({ renderApp }) {
     state.workersPendingKey = "domain";
     renderApp();
 
+    const requestScope = captureRequestContext(readWorkerContext);
+
     try {
       await removeWorkerDomain(activeWorkerName(), domainId, activeAccountId());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       state.workersActiveDetail = {
         ...state.workersActiveDetail,
         domains: (state.workersActiveDetail?.domains || []).filter(
@@ -638,16 +846,25 @@ export function createWorkersActions({ renderApp }) {
         ),
       };
       await loadWorkers();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice("自定义域已删除");
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersPendingKey = "";
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersPendingKey = "";
+        renderApp();
+      }
     }
   }
 
   function requestDeleteWorker(workerName) {
+    workerDetailRevision += 1;
     state.workersModal = "delete";
     state.workersDeleteName = workerName;
     state.workersDeleteConfirm = "";
@@ -673,17 +890,31 @@ export function createWorkersActions({ renderApp }) {
     state.workersSaving = true;
     renderApp();
 
+    let requestScope = captureRequestContext(readWorkerDeleteContext);
+    const deletedName = state.workersDeleteName;
+
     try {
-      await removeWorker(state.workersDeleteName, activeAccountId());
-      const deletedName = state.workersDeleteName;
+      await removeWorker(deletedName, activeAccountId());
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       resetModalState();
+      requestScope = captureRequestContext(readWorkerContext);
       await loadWorkers();
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(`Worker "${deletedName}" 已删除`);
     } catch (error) {
+      if (!requestScope.isCurrent()) {
+        return;
+      }
       setNotice(error.message);
     } finally {
-      state.workersSaving = false;
-      renderApp();
+      if (requestScope.isCurrent()) {
+        state.workersSaving = false;
+        renderApp();
+      }
     }
   }
 

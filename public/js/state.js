@@ -4,8 +4,11 @@ import {
   defaultPageRuleForm,
   defaultSpeedForm,
 } from "./constants.js";
+import { invalidateReadRequests } from "./request-scope.js";
 
 export const state = {
+  dataRevision: 0,
+  navigationRevision: 0,
   checkingSession: true,
   connectingSession: false,
   selectingCloudflareAccount: false,
@@ -41,6 +44,10 @@ export const state = {
   cloudflareAccountDialogOpen: false,
   cloudflareAccountSaving: false,
   cloudflareAccountError: "",
+  accountManagerOpen: false,
+  accountManagerBusy: false,
+  accountManagerEdit: null,
+  accountManagerNotice: "",
   activeCloudflareAccount: null,
   activeCloudflareAccountId: "",
   mainSection: "domain",
@@ -88,6 +95,7 @@ export const state = {
   dnsFormOpen: false,
   dnsBulkFormOpen: false,
   dnsBulkText: "",
+  dnsBulkResult: null,
   dnsSearchQuery: "",
   dnsSearchZoneId: "",
   selectedDnsRecordIds: [],
@@ -227,13 +235,19 @@ export function resetSessionState() {
   state.cloudflareAccountDialogOpen = false;
   state.cloudflareAccountSaving = false;
   state.cloudflareAccountError = "";
+  state.accountManagerOpen = false;
+  state.accountManagerBusy = false;
+  state.accountManagerEdit = null;
+  state.accountManagerNotice = "";
   state.activeCloudflareAccount = null;
   state.activeCloudflareAccountId = "";
   state.selectingCloudflareAccount = false;
   resetCloudflareAccountData();
 }
 
-export function resetCloudflareAccountData() {
+export function resetCloudflareAccountData({ preserveAccountManager = false } = {}) {
+  invalidateReadRequests();
+  if (!preserveAccountManager) resetAccountManagerState();
   state.mainSection = "domain";
   state.view = "domains";
   state.zoneSection = "dns";
@@ -279,6 +293,7 @@ export function resetCloudflareAccountData() {
   state.dnsFormOpen = false;
   state.dnsBulkFormOpen = false;
   state.dnsBulkText = "";
+  state.dnsBulkResult = null;
   state.dnsSearchQuery = "";
   state.dnsSearchZoneId = "";
   state.selectedDnsRecordIds = [];
@@ -305,6 +320,22 @@ export function resetCloudflareAccountData() {
   resetWorkersState();
   resetDeveloperResourcesState();
   resetOperationHistoryState();
+}
+
+export function resetPendingResourceState() {
+  resetAccountManagerState();
+  const booleanFlags = ["loadingAnalytics", "loadingPageRules", "loadingSslSettings", "loadingCertificates", "loadingDns", "loadingCacheSettings", "loadingFirewallRules",
+    "addingDomain", "savingDns", "savingDnsBulk", "deletingDnsBulk", "savingCacheSettings", "savingSslSettings", "savingCertificate", "purgingCache", "savingFirewallRule", "savingRulesetRule", "savingPageRule",
+    "speedDeploying", "speedDomainsLoading", "automationLoading", "automationApplying", "workersLoading", "workersLoadingDetail", "workersSaving", "workersRoutesLoading", "developerResourceDetailLoading", "developerResourceLoading", "developerResourceSaving", "operationHistoryLoading"];
+  for (const key of booleanFlags) state[key] = false;
+  for (const key of ["deletingFirewallRuleId", "deletingPageRuleId", "deletingCertificateId", "updatingFirewallRuleId", "updatingPageRuleId", "speedDomainDeleteId", "automationPendingKey", "workersPendingKey"]) state[key] = "";
+}
+
+function resetAccountManagerState() {
+  state.accountManagerOpen = false;
+  state.accountManagerBusy = false;
+  state.accountManagerEdit = null;
+  state.accountManagerNotice = "";
 }
 
 export function resetDnsForm() {

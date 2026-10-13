@@ -8,8 +8,10 @@
 - 简化登录：默认账号密码登录，可选验证器；登录设置中可开启或关闭 2FA。
 - SQLite 持久化：管理员密码使用 scrypt 哈希保存；启用的 2FA 密钥和 Cloudflare Global API Key 加密保存；记住登录的会话跨容器重启有效。
 - 多账户管理：Cloudflare 账号保存在 SQLite，登录后可在顶部切换。
+- 账号维护：顶部“账号管理”支持编辑名称与邮箱、更新密钥、测试连接和删除保存的账号；密钥留空保留原值，删除不会删除 Cloudflare 资源。
 - 域名管理：读取当前账号所有 Zone，展示域名、状态、区域 ID、套餐，并支持新增 Zone。
 - DNS 记录：读取、新增、编辑、删除和批量管理常用 DNS 记录，支持按类型、域名和内容/IP 模糊搜索。
+- 批量结果：提交前校验全部记录，逐条展示成功、失败、结果未确认和未执行；只重试失败与未执行项，避免重复添加成功记录。
 - 单域名管理：提供 DNS、SSL/TLS、缓存、防火墙、统计分析、页面规则、证书管理页面。
 - 一键加速：配置访问域名、源站域名、优选域名和 Cloudflare for SaaS 相关流程；保留当前 Zone SSL/TLS 模式，写入前检查冲突，失败时逆序恢复本次修改并报告恢复结果。
 - Workers 与开发资源：管理 Workers、Pages、D1、R2、KV、Cloudflare Tunnels 和 Worker 模板库。
@@ -144,7 +146,9 @@ docker exec cloudflare-preferred-panel cat /data/setup-token.txt
 
 ### 重置 Cloudflare API Key
 
-如果 Cloudflare Global API Key 泄露、失效或要整体换账号，推荐清空已保存的 Cloudflare 账号，再通过初始化第 2 页重新录入。管理员账号和 2FA 会保留。
+更换单个账号的密钥时，登录后进入顶部“账号管理”，点击对应账号的“编辑”，输入新 Global API Key，可先“测试连接”，再“保存账号”。留空会保留当前密钥；连接测试使用表单中的候选信息，不会自动保存。修改邮箱时请同时确认密钥属于该邮箱。
+
+下面的命令适用于需要清空全部已保存 Cloudflare 账号的情况。管理员账号和 2FA 会保留。
 
 ```bash
 docker stop cloudflare-preferred-panel
@@ -260,8 +264,13 @@ test/                                  # Node test 测试
 ## 测试
 
 ```bash
-node --test test/**/*.test.js
+npm ci
+npm test
+npx playwright install --with-deps chromium
+npm run test:browser
 ```
+
+PR 会自动执行语法检查、Node 测试和浏览器回归。浏览器测试使用临时 SQLite 与本地 Cloudflare 模拟服务，不需要真实凭据。具体运行说明见 [浏览器测试](./test/browser/README.md)，页面请求隔离、批量操作和账号维护说明见 [管理可靠性说明](./docs/reliable-management.md)。
 
 ## 安全说明
 

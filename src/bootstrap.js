@@ -1,4 +1,5 @@
 import { PanelSecurityController } from "./controllers/panel-security-controller.js";
+import { CloudflareAccountsController } from "./controllers/cloudflare-accounts-controller.js";
 import { CloudflareClient } from "./services/cloudflare/cloudflare-client.js";
 import { AnalyticsService } from "./services/cloudflare/analytics-service.js";
 import { AutomationService } from "./services/cloudflare/automation-service.js";
@@ -131,6 +132,9 @@ export function createContainer(config) {
   const panelSecurityController = new PanelSecurityController({
     credentialsController, panelAuthService, credentialSessionService,
   });
+  const cloudflareAccountsController = new CloudflareAccountsController({
+    cloudflareAccountService, credentialSessionService, panelAuthService, cloudflareClient,
+  });
   const developerResourcesController = new DeveloperResourcesController({
     developerResourcesService,
     d1SqlConsoleAllowMutations: config.features.d1SqlConsoleAllowMutations,
@@ -147,6 +151,7 @@ export function createContainer(config) {
 
   return {
     app: createApp({
+      cloudflareAccountsController,
       analyticsController,
       automationController,
       cacheSettingsController,
@@ -173,6 +178,7 @@ export function createContainer(config) {
     }),
     analyticsController,
     analyticsService,
+    cloudflareAccountsController,
     automationController,
     automationService,
     cacheSettingsController,

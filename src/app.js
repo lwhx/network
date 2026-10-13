@@ -4,6 +4,7 @@ import { serveStaticFile } from "./middleware/static-files.js";
 import { createApiRouter } from "./routes/api-routes.js";
 
 export function createApp({
+  cloudflareAccountsController,
   analyticsController,
   automationController,
   cacheSettingsController,
@@ -28,6 +29,7 @@ export function createApp({
   zonesController,
 }) {
   const apiRouter = createApiRouter({
+    cloudflareAccountsController,
     analyticsController,
     automationController,
     cacheSettingsController,

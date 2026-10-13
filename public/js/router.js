@@ -19,7 +19,7 @@ export function updateRoute() {
   state.view = "zone";
   state.mainSection = "domain";
   state.zoneSection = section;
-  state.selectedZone = zone || state.selectedZone || { id: zoneId, name: "Loading" };
+  state.selectedZone = zone || (state.selectedZone?.id === zoneId ? state.selectedZone : null) || { id: zoneId, name: "Loading" };
 }
 
 export function routeToZone(zone, section = "dns") {

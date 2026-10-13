@@ -1,0 +1,36 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createServer } from "node:http";
+import { createContainer } from "../src/bootstrap.js";
+import { createConfig } from "../src/config/env.js";
+
+test("account management routes require login and CSRF and preserve a blank API key", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "account-routes-"));
+  const container = createContainer(createConfig({ DATA_DIR: dir, SETUP_TOKEN: "token" }));
+  container.panelAuthService.createPanelUserSetup({ username: "operator", password: "operator-password" });
+  const account = container.sqliteStore.createCloudflareAccount({ email: "operator@example.com", globalApiKey: "saved-test-secret", name: "Old" });
+  const session = container.credentialSessionService.create({ authenticated: true, activeCloudflareAccountId: account.id });
+  const server = createServer(container.app);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { await new Promise((resolve) => server.close(resolve)); container.sqliteStore.close(); rmSync(dir, { recursive: true, force: true }); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const url = `${origin}/api/session/cloudflare-accounts/${account.id}`;
+  assert.equal((await fetch(url)).status, 401);
+  const headers = { cookie: `cf_panel_session=${session.id}`, origin, "Content-Type": "application/json" };
+  assert.equal((await fetch(url, { method: "PATCH", headers, body: JSON.stringify({ cloudflareName: "New" }) })).status, 403);
+  headers["X-CSRF-Token"] = session.csrfToken;
+  const detail = await (await fetch(url, { headers })).json();
+  assert.equal(detail.account.email, "operator@example.com");
+  assert.ok(!JSON.stringify(detail).includes("saved-test-secret"));
+  const updated = await fetch(url, { method: "PATCH", headers, body: JSON.stringify({ cloudflareName: "New", cfApiKey: "" }) });
+  assert.equal(updated.status, 200);
+  assert.equal(container.cloudflareAccountService.findAccount(account.id).globalApiKey, "saved-test-secret");
+  assert.equal((await updated.json()).accounts[0].name, "New");
+  assert.equal((await fetch(url, { method: "DELETE", headers })).status, 200);
+  const status = await (await fetch(`${origin}/api/session/status`, { headers })).json();
+  assert.equal(status.authenticated, true);
+  assert.equal(status.setupState.cloudflareAccountRequired, true);
+});

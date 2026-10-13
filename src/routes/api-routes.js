@@ -1,6 +1,10 @@
 import { sameOriginRequest } from "../lib/request-origin.js";
 
 function matchRoute(method, pathname) {
+  const accountMatch = pathname.match(/^\/api\/session\/cloudflare-accounts\/(?<accountId>[a-z0-9_-]{1,96})(?:\/(?<action>test))?$/i);
+  if (accountMatch) {
+    return { key: `${method} /api/session/cloudflare-accounts/:accountId${accountMatch.groups.action ? "/test" : ""}`, params: accountMatch.groups };
+  }
   const cloudflareAccountSelectMatch = pathname.match(
     /^\/api\/session\/cloudflare-accounts\/(?<accountId>[a-z0-9_-]{1,96})\/select$/i
   );
@@ -558,6 +562,7 @@ const csrfExemptRoutes = new Set([
 const stateChangingMethods = new Set(["DELETE", "PATCH", "POST", "PUT"]);
 
 export function createApiRouter({
+  cloudflareAccountsController,
   analyticsController,
   automationController,
   cacheSettingsController,
@@ -582,6 +587,10 @@ export function createApiRouter({
   zonesController,
 }) {
   const routes = new Map([
+    ["GET /api/session/cloudflare-accounts/:accountId", cloudflareAccountsController.detail],
+    ["PATCH /api/session/cloudflare-accounts/:accountId", cloudflareAccountsController.update],
+    ["DELETE /api/session/cloudflare-accounts/:accountId", cloudflareAccountsController.delete],
+    ["POST /api/session/cloudflare-accounts/:accountId/test", cloudflareAccountsController.test],
     ["GET /api/setup/status", credentialsController.setupStatus],
     ["POST /api/setup/secret", credentialsController.setupSecret],
     ["POST /api/setup/admin", credentialsController.createSetupAdmin],

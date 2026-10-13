@@ -1,3 +1,5 @@
+import { HttpError } from "../lib/http-error.js";
+
 function maskEmail(email) {
   const [name = "", domain = ""] = String(email).split("@");
 
@@ -75,7 +77,8 @@ export class CloudflareAccountService {
   }
 
   findAccount(accountId = "") {
-    return accountId ? normalizeAccount(this.store?.getCloudflareAccount(accountId)) : null;
+    const id = String(accountId || "").trim();
+    return id ? normalizeAccount(this.store?.getCloudflareAccount(id)) : null;
   }
 
   hasAccount(accountId = "") {
@@ -95,6 +98,65 @@ export class CloudflareAccountService {
       name: account.name,
       source: account.source,
     };
+  }
+
+  getEditableAccount(accountId) {
+    const account = this.findAccount(accountId);
+    if (!account) return null;
+    return {
+      email: account.email,
+      hasApiKey: Boolean(account.globalApiKey),
+      id: account.id,
+      name: account.name,
+      source: account.source,
+    };
+  }
+
+  prepareUpdate(accountId, input = {}) {
+    const existing = this.findAccount(accountId);
+    if (!existing) throw new HttpError(404, "Cloudflare 账号不存在。");
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new HttpError(400, "请输入有效的 Cloudflare 账号信息。");
+    }
+    for (const field of ["cloudflareName", "cfEmail", "cfApiKey"]) {
+      if (Object.hasOwn(input, field) && typeof input[field] !== "string") {
+        throw new HttpError(400, "Cloudflare 账号信息必须是文本。");
+      }
+    }
+    const email = Object.hasOwn(input, "cfEmail") ? input.cfEmail.trim().toLowerCase() : existing.email;
+    const globalApiKey = input.cfApiKey?.trim() || existing.globalApiKey;
+    const name = Object.hasOwn(input, "cloudflareName") ? input.cloudflareName.trim() || maskEmail(email) : existing.name;
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new HttpError(400, "请输入有效的 Cloudflare 登录邮箱。");
+    }
+    if (globalApiKey.length < 8 || globalApiKey.length > 256) {
+      throw new HttpError(400, "请输入有效的 Cloudflare Global API Key。");
+    }
+    if (name.length > 128) throw new HttpError(400, "Cloudflare 账号名称不能超过 128 个字符。");
+    return { ...existing, email, globalApiKey, name };
+  }
+
+  updateAccount(accountId, input, { authorize = () => {} } = {}) {
+    return this.store.runSetupTransaction(() => {
+      authorize();
+      const candidate = this.prepareUpdate(accountId, input);
+      if (this.listAccounts().some((account) => account.id !== candidate.id && account.email.toLowerCase() === candidate.email)) {
+        throw new HttpError(409, "该 Cloudflare 登录邮箱已存在。");
+      }
+      this.store.updateCloudflareAccount(candidate.id, candidate);
+      return this.getEditableAccount(candidate.id);
+    });
+  }
+
+  deleteAccount(accountId, { authorize = () => {}, onDeleted = () => {} } = {}) {
+    return this.store.runSetupTransaction(() => {
+      authorize();
+      const account = this.findAccount(accountId);
+      if (!account) throw new HttpError(404, "Cloudflare 账号不存在。");
+      this.store.deleteCloudflareAccount(account.id);
+      onDeleted();
+      return true;
+    });
   }
 
   getCredentials(accountId = "") {

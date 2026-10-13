@@ -1,15 +1,19 @@
 import { createZone, fetchZones } from "../api.js";
 import { routeToZone, updateRoute } from "../router.js";
 import { state } from "../state.js";
+import { beginScopedRequest, captureRequestContext } from "../request-scope.js";
 
 export function createDomainActions({ loadZoneSectionData, renderApp, showNotice }) {
   async function loadZones({ throwOnError = false } = {}) {
+    const request = beginScopedRequest("zones", () => "", { navigation: false });
     state.loadingZones = true;
     state.zoneError = "";
     renderApp();
 
     try {
-      state.zones = await fetchZones();
+      const zones = await fetchZones({ signal: request.signal });
+      if (!request.isCurrent()) return;
+      state.zones = zones;
       updateRoute();
 
       if (state.view === "zone") {
@@ -19,14 +23,17 @@ export function createDomainActions({ loadZoneSectionData, renderApp, showNotice
         await loadZoneSectionData();
       }
     } catch (error) {
+      if (!request.isCurrent()) return;
       state.zoneError = error.message;
 
       if (throwOnError) {
         throw error;
       }
     } finally {
-      state.loadingZones = false;
-      renderApp();
+      if (request.isCurrent()) {
+        state.loadingZones = false;
+        renderApp();
+      }
     }
   }
 
@@ -40,6 +47,7 @@ export function createDomainActions({ loadZoneSectionData, renderApp, showNotice
       showNotice("请输入要添加的域名");
       return;
     }
+    const request = captureRequestContext(() => `${state.mainSection}:${state.view}`);
 
     state.addingDomain = true;
     state.notice = "";
@@ -51,15 +59,18 @@ export function createDomainActions({ loadZoneSectionData, renderApp, showNotice
         type: "full",
         jumpStart: false,
       });
-
+      if (!request.isCurrent()) return;
       state.domainDraft = "";
       state.notice = `${zone.name || domain} 已提交到 Cloudflare`;
       await loadZones({ throwOnError: false });
     } catch (error) {
+      if (!request.isCurrent()) return;
       state.notice = error.message;
     } finally {
-      state.addingDomain = false;
-      renderApp();
+      if (request.isCurrent()) {
+        state.addingDomain = false;
+        renderApp();
+      }
     }
   }
 

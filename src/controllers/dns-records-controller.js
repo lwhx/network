@@ -19,11 +19,14 @@ export class DnsRecordsController {
 
   createBulk = async ({ request, params }) => {
     const body = await readJsonBody(request);
-    const records = await this.dnsRecordsService.createRecords(
+    const result = await this.dnsRecordsService.createRecordsDetailed(
       params.zoneId,
-      Array.isArray(body) ? body : body.records
+      Array.isArray(body) ? body : body?.records
     );
-    return { statusCode: 201, body: { records } };
+    return {
+      statusCode: result.summary.succeeded === result.summary.total ? 201 : 207,
+      body: result,
+    };
   };
 
   update = async ({ request, params }) => {
@@ -51,10 +54,13 @@ export class DnsRecordsController {
 
   deleteBulk = async ({ request, params }) => {
     const body = await readJsonBody(request);
-    const deleted = await this.dnsRecordsService.deleteRecords(
+    const result = await this.dnsRecordsService.deleteRecordsDetailed(
       params.zoneId,
-      Array.isArray(body) ? body : body.recordIds
+      Array.isArray(body) ? body : body?.recordIds
     );
-    return { statusCode: 200, body: { deleted } };
+    return {
+      statusCode: result.summary.succeeded === result.summary.total ? 200 : 207,
+      body: result,
+    };
   };
 }

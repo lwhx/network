@@ -1,3 +1,5 @@
+import { trackReadRequest } from "./request-scope.js";
+
 export class ApiUnavailableError extends Error {
   constructor(message) {
     super(message);
@@ -28,11 +30,14 @@ function requestHeaders(headers = {}, method = "GET") {
 
 function apiFetch(url, options = {}) {
   const method = options.method || "GET";
-
+  const cancellable = method === "GET" && !/^\/api\/(session|setup)\//.test(url);
+  const controller = cancellable ? new AbortController() : null;
+  const cleanup = controller ? trackReadRequest(controller, url) : () => {};
   return fetch(url, {
     ...options,
+    ...(controller ? { signal: options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal } : {}),
     headers: requestHeaders(options.headers, method),
-  });
+  }).finally(cleanup);
 }
 
 function isJsonResponse(response) {
@@ -56,8 +61,8 @@ async function readJson(response, fallbackMessage) {
   return payload;
 }
 
-export async function fetchZones() {
-  const response = await apiFetch("/api/zones");
+export async function fetchZones(options = {}) {
+  const response = await apiFetch("/api/zones", options);
   const payload = await readJson(response, "读取域名失败");
 
   return payload.zones;
@@ -160,8 +165,8 @@ export async function logoutCloudflareAccount() {
   return readJson(response, "退出登录失败");
 }
 
-export async function fetchDnsRecords(zoneId) {
-  const response = await apiFetch(`/api/zones/${zoneId}/dns-records`);
+export async function fetchDnsRecords(zoneId, options = {}) {
+  const response = await apiFetch(`/api/zones/${zoneId}/dns-records`, options);
   const payload = await readJson(response, "读取 DNS 记录失败");
 
   return payload.records;
@@ -205,7 +210,7 @@ export async function createDnsRecordsBulk(zoneId, records) {
   });
   const payload = await readJson(response, "批量添加 DNS 记录失败");
 
-  return payload.records;
+  return payload;
 }
 
 export async function removeDnsRecordsBulk(zoneId, recordIds) {
@@ -915,6 +920,30 @@ export async function fetchLoginSettingsSecret(body) {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
   return readJson(response, "生成验证器密钥失败");
+}
+
+export async function fetchManagedCloudflareAccount(accountId, options = {}) {
+  const response = await apiFetch(`/api/session/cloudflare-accounts/${encodeURIComponent(accountId)}`, options);
+  return readJson(response, "读取 Cloudflare 账号失败");
+}
+
+export async function updateManagedCloudflareAccount(accountId, input) {
+  const response = await apiFetch(`/api/session/cloudflare-accounts/${encodeURIComponent(accountId)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  });
+  return readJson(response, "更新 Cloudflare 账号失败");
+}
+
+export async function deleteManagedCloudflareAccount(accountId) {
+  const response = await apiFetch(`/api/session/cloudflare-accounts/${encodeURIComponent(accountId)}`, { method: "DELETE" });
+  return readJson(response, "删除 Cloudflare 账号失败");
+}
+
+export async function testManagedCloudflareAccount(accountId, input) {
+  const response = await apiFetch(`/api/session/cloudflare-accounts/${encodeURIComponent(accountId)}/test`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  });
+  return readJson(response, "Cloudflare 连接测试失败");
 }
 
 export async function updateLoginSettings(body) {
