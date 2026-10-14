@@ -1,4 +1,11 @@
 export function bindEvents(actions) {
+  document.querySelector("#speed-tasks-refresh")?.addEventListener("click", actions.loadSpeedTasks);
+  document.querySelectorAll(".speed-task-inspect").forEach((button) => button.addEventListener("click", () => actions.inspectSpeedTask(button.dataset.taskId)));
+  document.querySelector("#speed-task-detail-close")?.addEventListener("click", actions.closeSpeedTaskDetail);
+  document.querySelector("#speed-task-recover")?.addEventListener("click", actions.recoverSpeedTask);
+  document.querySelector("#speed-task-resolve")?.addEventListener("click", actions.resolveSpeedTask);
+  document.querySelector("#history-previous")?.addEventListener("click", actions.previousHistoryPage);
+  document.querySelector("#history-next")?.addEventListener("click", actions.nextHistoryPage);
   document.querySelector("#cloudflare-account-manage")?.addEventListener("click", actions.openAccountManager);
   document.querySelectorAll(".account-manager-close").forEach((button) => button.addEventListener("click", actions.closeAccountManager));
   document.querySelectorAll(".cloudflare-account-edit").forEach((button) => button.addEventListener("click", () => actions.editManagedCloudflareAccount(button.dataset.accountId)));

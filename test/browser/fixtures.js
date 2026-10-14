@@ -70,6 +70,18 @@ async function createPanel({ seed }) {
       email: request.headers["x-auth-email"], apiKey: request.headers["x-auth-key"] });
     let result;
     if (url.pathname === "/zones") result = zones;
+    else if (url.pathname.match(/^\/zones\/[a-f0-9]{32}\/dns_records\/[a-f0-9]{32}$/)) {
+      const [, , zoneId, , recordId] = url.pathname.split("/");
+      const items = records.get(zoneId);
+      const index = items.findIndex((item) => item.id === recordId);
+      if (index < 0) {
+        response.writeHead(404, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ success: false, errors: [{ message: "Record not found" }] })); return;
+      }
+      if (request.method === "PATCH") { items[index] = { ...items[index], ...body }; result = items[index]; }
+      else if (request.method === "DELETE") { items.splice(index, 1); result = { id: recordId }; }
+      else result = items[index];
+    }
     else if (url.pathname.match(/^\/zones\/[a-f0-9]{32}\/dns_records$/)) {
       const id = url.pathname.split("/")[2];
       if (request.method === "POST") {
@@ -97,6 +109,22 @@ async function createPanel({ seed }) {
   let server;
   let port = 0;
   const panel = { origin: "", calls,
+    seedRecoveryTask({ externalChange = false, pending = false } = {}) {
+      const accountId = container.cloudflareAccountService.getDefaultAccount().id;
+      const original = records.get(zoneA)[0];
+      const fields = (record) => ({ id: record.id, type: record.type, name: record.name, content: record.content,
+        ttl: record.ttl, proxied: record.proxied, comment: record.comment || "", tags: record.tags || [] });
+      const before = fields(original);
+      const expected = { ...before, content: "192.0.2.20" };
+      records.get(zoneA)[0] = { ...original, content: externalChange ? "192.0.2.99" : expected.content };
+      container.speedTaskStore.acquireScope(accountId, zoneA);
+      const id = container.speedTaskStore.begin(accountId, { zoneId: zoneA, zoneName: "alpha.example", accessDomain: original.name });
+      const { id: ignored, ...creationBody } = expected;
+      container.speedTaskStore.save(id, accountId, { steps: [{ type: "dns", zoneId: zoneA, label: "访问域名 DNS", before, expected,
+        creationBody, confirmed: !pending, status: pending ? "pending" : "confirmed" }], audit: [] }, { status: "manual_needed" });
+      return id;
+    },
+    recordContent() { return records.get(zoneA)[0].content; },
     rejectNextCreate(name) { rejectedCreates.add(name); },
     async restart() {
       if (server) { await close(server); container.sqliteStore.close(); }

@@ -42,8 +42,9 @@ function normalizeAccount(account) {
 export { maskEmail };
 
 export class CloudflareAccountService {
-  constructor({ store } = {}) {
+  constructor({ store, speedTaskStore = null } = {}) {
     this.store = store;
+    this.speedTaskStore = speedTaskStore;
   }
 
   listAccounts() {
@@ -153,6 +154,9 @@ export class CloudflareAccountService {
       authorize();
       const account = this.findAccount(accountId);
       if (!account) throw new HttpError(404, "Cloudflare 账号不存在。");
+      if (this.speedTaskStore?.hasUnresolvedAccountTasks(account.id)) {
+        throw new HttpError(409, "该账号有未完成的加速任务，请先恢复或核查任务，再删除账号。");
+      }
       this.store.deleteCloudflareAccount(account.id);
       onDeleted();
       return true;

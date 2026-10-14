@@ -1,4 +1,6 @@
 import { PanelSecurityController } from "./controllers/panel-security-controller.js";
+import { SpeedTaskStore } from "./services/speed-task-store.js";
+import { SpeedTasksController } from "./controllers/speed-tasks-controller.js";
 import { CloudflareAccountsController } from "./controllers/cloudflare-accounts-controller.js";
 import { CloudflareClient } from "./services/cloudflare/cloudflare-client.js";
 import { AnalyticsService } from "./services/cloudflare/analytics-service.js";
@@ -49,6 +51,7 @@ export function createContainer(config) {
   });
   const cloudflareAccountService = new CloudflareAccountService({
     store: sqliteStore,
+    speedTaskStore: new SpeedTaskStore({ store: sqliteStore }),
   });
   const cloudflareClient = new CloudflareClient({
     apiBaseUrl: config.cloudflare.apiBaseUrl,
@@ -84,6 +87,7 @@ export function createContainer(config) {
   const speedDeployService = new SpeedDeployService({
     cloudflareClient,
     dnsRecordsService,
+    speedTaskStore: cloudflareAccountService.speedTaskStore,
   });
   const sslSettingsService = new SslSettingsService({
     cloudflareClient,
@@ -103,7 +107,7 @@ export function createContainer(config) {
     trustProxyHeaders: config.server.trustProxyHeaders,
     ttlDays: config.session.ttlDays,
   });
-  const operationHistoryService = new OperationHistoryService();
+  const operationHistoryService = new OperationHistoryService({ store: sqliteStore });
   const panelAuthService = new PanelAuthService({
     store: sqliteStore,
   });
@@ -146,11 +150,13 @@ export function createContainer(config) {
   });
   const pageRulesController = new PageRulesController({ pageRulesService });
   const speedDeployController = new SpeedDeployController({ speedDeployService });
+  const speedTasksController = new SpeedTasksController({ speedDeployService, credentialSessionService });
   const sslSettingsController = new SslSettingsController({ sslSettingsService });
   const workersController = new WorkersController({ workersService });
 
   return {
     app: createApp({
+      speedTasksController,
       cloudflareAccountsController,
       analyticsController,
       automationController,
@@ -178,6 +184,8 @@ export function createContainer(config) {
     }),
     analyticsController,
     analyticsService,
+    speedTasksController,
+    speedTaskStore: cloudflareAccountService.speedTaskStore,
     cloudflareAccountsController,
     automationController,
     automationService,

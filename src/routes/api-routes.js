@@ -1,6 +1,18 @@
 import { sameOriginRequest } from "../lib/request-origin.js";
 
+function historyOutcome(result) {
+  const summary = result.body?.summary;
+  if (summary) {
+    if (summary.unknown > 0) return "unknown";
+    if (summary.failed > 0 || summary.skipped > 0) return summary.succeeded > 0 ? "partial" : "failed";
+  }
+  if (result.body?.rollback?.status === "incomplete" || result.body?.task?.status === "manual_needed") return "unknown";
+  return result.statusCode >= 400 ? "failed" : "success";
+}
+
 function matchRoute(method, pathname) {
+  const speedTaskMatch = pathname.match(/^\/api\/speed-tasks\/(?<taskId>[a-f0-9-]{36})(?:\/(?<action>recover|resolve))?$/i);
+  if (speedTaskMatch) return { key: `${method} /api/speed-tasks/:taskId${speedTaskMatch.groups.action ? `/${speedTaskMatch.groups.action}` : ""}`, params: speedTaskMatch.groups };
   const accountMatch = pathname.match(/^\/api\/session\/cloudflare-accounts\/(?<accountId>[a-z0-9_-]{1,96})(?:\/(?<action>test))?$/i);
   if (accountMatch) {
     return { key: `${method} /api/session/cloudflare-accounts/:accountId${accountMatch.groups.action ? "/test" : ""}`, params: accountMatch.groups };
@@ -562,6 +574,7 @@ const csrfExemptRoutes = new Set([
 const stateChangingMethods = new Set(["DELETE", "PATCH", "POST", "PUT"]);
 
 export function createApiRouter({
+  speedTasksController,
   cloudflareAccountsController,
   analyticsController,
   automationController,
@@ -587,6 +600,10 @@ export function createApiRouter({
   zonesController,
 }) {
   const routes = new Map([
+    ["GET /api/speed-tasks", speedTasksController.list],
+    ["GET /api/speed-tasks/:taskId", speedTasksController.inspect],
+    ["POST /api/speed-tasks/:taskId/recover", speedTasksController.recover],
+    ["POST /api/speed-tasks/:taskId/resolve", speedTasksController.resolve],
     ["GET /api/session/cloudflare-accounts/:accountId", cloudflareAccountsController.detail],
     ["PATCH /api/session/cloudflare-accounts/:accountId", cloudflareAccountsController.update],
     ["DELETE /api/session/cloudflare-accounts/:accountId", cloudflareAccountsController.delete],
@@ -739,6 +756,7 @@ export function createApiRouter({
     ["PATCH /api/zones/:zoneId/page-rules/:ruleId", pageRulesController.update],
     ["DELETE /api/zones/:zoneId/page-rules/:ruleId", pageRulesController.delete],
   ]);
+  const zoneNames = new Map();
 
   return {
     match(request, url) {
@@ -767,6 +785,15 @@ export function createApiRouter({
           requiresPanelLogin && !sessionCredentials?.authenticated
             ? null
             : cloudflareCredentials;
+        const account = cloudflareAccountService?.getSafeAccount(selectedAccountId);
+        const historyScope = (result = {}) => {
+          const task = result.body?.task;
+          const deployment = result.body?.deployment;
+          const zoneId = match.params.zoneId || task?.zoneId || deployment?.zoneId || "";
+          return { accountId: selectedAccountId || "", accountName: account?.name || "",
+            zoneId, zoneName: task?.zoneName || deployment?.zoneName || zoneNames.get(`${selectedAccountId}:${zoneId}`) || "",
+            ...(match.params.taskId ? { resource: match.params.taskId } : {}) };
+        };
         const executeHandler = () => handler({ ...context, credentials, params: match.params });
 
         try {
@@ -810,15 +837,20 @@ export function createApiRouter({
           }
 
           const result = await cloudflareClient.withCredentials(credentials, executeHandler);
+          if (match.key === "GET /api/zones") {
+            for (const zone of result.body?.zones || []) zoneNames.set(`${selectedAccountId}:${zone.id}`, zone.name);
+          }
 
           if (operationHistoryService?.shouldRecord(context.request.method, context.url.pathname)) {
             operationHistoryService.record({
+              ...historyScope(result),
               durationMs: Date.now() - startedAt,
               method: context.request.method,
               params: match.params,
               pathname: context.url.pathname,
-              status: result.statusCode >= 400 ? "failed" : "success",
+              status: historyOutcome(result),
               statusCode: result.statusCode,
+              summary: result.body?.summary,
             });
           }
 
@@ -826,12 +858,13 @@ export function createApiRouter({
         } catch (error) {
           if (operationHistoryService?.shouldRecord(context.request.method, context.url.pathname)) {
             operationHistoryService.record({
+              ...historyScope(),
               durationMs: Date.now() - startedAt,
               error: error.message,
               method: context.request.method,
               params: match.params,
               pathname: context.url.pathname,
-              status: "failed",
+              status: error.remoteOutcomeUnknown || error.rollback?.status === "incomplete" ? "unknown" : "failed",
               statusCode: error.statusCode || 500,
             });
           }

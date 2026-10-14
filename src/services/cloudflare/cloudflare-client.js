@@ -48,6 +48,7 @@ export class CloudflareClient {
 
     return this.credentialContext.run(
       {
+        accountId: credentials.accountId || "",
         email: credentials.email,
         globalApiKey: credentials.globalApiKey,
       },
@@ -91,25 +92,32 @@ export class CloudflareClient {
     });
 
     if (!response.ok) {
-      throw new HttpError(
+      const error = new HttpError(
         response.status,
         await this.readErrorMessage(response, `Cloudflare API 请求失败 (${response.status})`)
       );
+      error.remoteOutcomeUnknown = response.status >= 500;
+      throw error;
     }
 
     const payload = await response.json().catch(() => null);
 
-    if (payload && payload.success === false) {
+    if (payload?.success === false) {
       const cloudflareMessage =
         payload.errors
           ?.map((item) => item.message)
           .filter(Boolean)
           .join("；") || `Cloudflare API 请求失败 (${response.status})`;
 
-      throw new HttpError(response.status, cloudflareMessage);
+      throw new HttpError(response.ok ? 502 : response.status, cloudflareMessage);
     }
-
-    return payload || { success: true };
+    if (response.status === 204 && !payload) return { success: true };
+    if (!payload || payload.success !== true) {
+      const error = new HttpError(502, "Cloudflare 删除请求结果无法确认，请核查远端配置。");
+      error.remoteOutcomeUnknown = true;
+      throw error;
+    }
+    return payload;
   }
 
   async getText(path, searchParams = {}) {

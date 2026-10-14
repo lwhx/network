@@ -113,7 +113,7 @@ function readSpeedDomainsContext() {
   return JSON.stringify([readSpeedContext(), state.speedDomainsOpen, state.zones.map((zone) => zone.id)]);
 }
 
-export function createSpeedActions({ renderApp }) {
+export function createSpeedActions({ renderApp, onTaskChange = async () => {} }) {
   let activeDeployRun = 0;
   let deployTimers = [];
 
@@ -229,6 +229,7 @@ export function createSpeedActions({ renderApp }) {
       state.speedProgress = 100;
       state.speedStep = "complete";
       renderApp();
+      await onTaskChange();
     } catch (deployError) {
       if (!requestScope.isCurrent() || deployRun !== activeDeployRun) {
         return;
@@ -237,7 +238,8 @@ export function createSpeedActions({ renderApp }) {
       clearDeployTimers();
       state.speedDeploying = false;
       state.speedProgress = 0;
-      showSpeedNotice(deployError.message || "部署一键加速失败");
+      showSpeedNotice(`${deployError.message || "部署一键加速失败"}${deployError.taskId ? "；任务已保存，请在加速任务记录中检查。" : ""}`);
+      await onTaskChange();
     } finally {
       if (deployRun === activeDeployRun) {
         clearDeployTimers();

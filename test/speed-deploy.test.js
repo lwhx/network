@@ -404,7 +404,7 @@ test("rejects one-click acceleration when the access domain is outside the zone"
 });
 
 
-test("speed deployment API reports confirmed rollback after a failed traffic switch", async () => {
+test("speed deployment API retains an unconfirmed traffic switch for manual recovery", async () => {
   const zoneId = "a".repeat(32);
   let failed = false;
   const cloudflareMock = createCloudflareMock({
@@ -429,9 +429,15 @@ test("speed deployment API reports confirmed rollback after a failed traffic swi
       optimizedDomain: "saas.sin.fan", zoneName: "alpha.example", cacheTtl: 0,
     });
     assert.equal(response.status, 502);
-    assert.equal(payload.rollback.status, "complete");
-    assert.match(payload.error, /已恢复/);
-    assert.deepEqual(cloudflareMock.state, before);
+    assert.equal(payload.rollback.status, "incomplete");
+    assert.ok(payload.taskId);
+    assert.match(payload.error, /恢复未完成/);
+    assert.equal(cloudflareMock.state.dnsRecords.length, before.dnsRecords.length + 1);
+    assert.equal(cloudflareMock.state.dnsRecords.at(-1).name, "cdn.alpha.example");
+    assert.deepEqual(cloudflareMock.state.customHostnames, before.customHostnames);
+    assert.equal(cloudflareMock.state.fallbackOrigin, before.fallbackOrigin);
+    assert.ok(payload.rollback.steps.some(step => step.resource === "访问域名 DNS" && step.status === "failed"));
+    assert.ok(payload.rollback.steps.some(step => step.resource === "回退源 DNS" && step.status === "restored"));
   } finally {
     await panel.stop();
     cloudflareMock.server.close();

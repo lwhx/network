@@ -97,6 +97,7 @@ function makeRecord(overrides = {}) {
 }
 
 function createAdvancedMock({ zoneId, requests }) {
+  const deletedPaths = new Set();
   return createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     const body = await readJsonBody(request).catch(() => null);
@@ -229,7 +230,7 @@ function createAdvancedMock({ zoneId, requests }) {
             proxied: true,
             comment: "一键加速回退源",
           }),
-        ],
+        ].filter(record => !deletedPaths.has(`/zones/${zoneId}/dns_records/${record.id}`)),
         { page: 1, per_page: 100, total_pages: 1, total_count: 2 }
       ));
       return;
@@ -245,7 +246,7 @@ function createAdvancedMock({ zoneId, requests }) {
             status: "active",
             ssl: { status: "active", method: "http" },
           },
-        ],
+        ].filter(hostname => !deletedPaths.has(`/zones/${zoneId}/custom_hostnames/${hostname.id}`)),
         { page: 1, per_page: 50, total_pages: 1, total_count: 1 }
       ));
       return;
@@ -256,6 +257,7 @@ function createAdvancedMock({ zoneId, requests }) {
       (url.pathname === `/zones/${zoneId}/dns_records/${"b".repeat(32)}` ||
         url.pathname === `/zones/${zoneId}/custom_hostnames/custom-hostname-1`)
     ) {
+      deletedPaths.add(url.pathname);
       response.writeHead(204);
       response.end();
       return;

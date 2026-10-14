@@ -3,6 +3,7 @@ import { icon } from "../icons.js";
 import { state } from "../state.js";
 import { escapeHtml } from "../utils.js";
 import { renderShell } from "./shell-view.js";
+import { renderSpeedTasks } from "./speed-tasks-view.js";
 
 function currentSpeedForm() {
   return state.speedForm || {};
@@ -407,6 +408,7 @@ export function renderSpeedView() {
         ${renderSpeedStep()}
       </div>
       ${renderSpeedUsageGuide()}
+      ${renderSpeedTasks()}
       ${renderSpeedDomainsDialog()}
     </section>
   `);
