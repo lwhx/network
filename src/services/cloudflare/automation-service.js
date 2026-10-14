@@ -1,3 +1,4 @@
+import { readCloudflareList } from "./cloudflare-list-reader.js";
 import { HttpError } from "../../lib/http-error.js";
 import { assertCloudflareId } from "./cloudflare-id.js";
 import {
@@ -573,33 +574,8 @@ export class AutomationService {
   }
 
   async listRawDnsRecords(zoneId) {
-    const records = [];
-    let page = 1;
-    let totalPages = 1;
-
-    do {
-      const payload = await this.cloudflareClient.get(`zones/${zoneId}/dns_records`, {
-        page,
-        per_page: this.perPage,
-        order: "type",
-        direction: "asc",
-      });
-
-      if (!Array.isArray(payload.result)) {
-        throw new HttpError(502, "Cloudflare DNS 记录返回格式异常，请稍后重试。");
-      }
-
-      records.push(...payload.result);
-
-      const reportedTotalPages = Number(payload.result_info?.total_pages);
-      totalPages =
-        Number.isFinite(reportedTotalPages) && reportedTotalPages >= page
-          ? reportedTotalPages
-          : page;
-      page += 1;
-    } while (page <= totalPages);
-
-    return records;
+    return readCloudflareList({ client: this.cloudflareClient, path: `zones/${zoneId}/dns_records`,
+      perPage: this.perPage, query: { order: "type", direction: "asc" }, errorMessage: "Cloudflare DNS 记录读取失败" });
   }
 
   async listFirewallRules(zoneId) {

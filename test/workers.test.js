@@ -319,12 +319,13 @@ function createWorkersMock({ accountId, dnsRecords = [], zoneId, requests }) {
     }
 
     if (request.method === "GET" && url.pathname === `/zones/${zoneId}/dns_records`) {
+      const dnsItems = records.filter((record) => record.type !== "ROUTE");
       makeJsonResponse(response, 200, {
         success: true,
         errors: [],
         messages: [],
-        result: records.filter((record) => record.type !== "ROUTE"),
-        result_info: { page: 1, per_page: 100, total_pages: 1, total_count: records.length },
+        result: dnsItems,
+        result_info: { page: 1, per_page: 100, total_pages: 1, total_count: dnsItems.length },
       });
       return;
     }

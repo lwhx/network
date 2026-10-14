@@ -1,3 +1,4 @@
+import { readCloudflareList } from "./cloudflare-list-reader.js";
 import { randomBytes } from "node:crypto";
 import { HttpError } from "../../lib/http-error.js";
 import { assertD1SqlAllowed } from "../../lib/sql-safety.js";
@@ -265,6 +266,7 @@ const definitions = {
     createMethod: "post",
   },
   r2: {
+    pagination: "cursor",
     listPath: (accountId) => `accounts/${accountId}/r2/buckets`,
     createPath: (accountId) => `accounts/${accountId}/r2/buckets`,
     deletePath: (accountId, bucketName) =>
@@ -331,32 +333,9 @@ export class DeveloperResourcesService {
   }
 
   async listAccounts() {
-    const accounts = [];
-    let page = 1;
-    let totalPages = 1;
-
-    do {
-      const payload = await this.cloudflareClient.get("accounts", {
-        page,
-        per_page: this.perPage,
-        direction: "asc",
-      });
-
-      if (!Array.isArray(payload.result)) {
-        throw new HttpError(502, "Cloudflare 账号列表返回格式异常，请稍后重试。");
-      }
-
-      accounts.push(...payload.result.map(normalizeAccount));
-
-      const reportedTotalPages = Number(payload.result_info?.total_pages);
-      totalPages =
-        Number.isFinite(reportedTotalPages) && reportedTotalPages >= page
-          ? reportedTotalPages
-          : page;
-      page += 1;
-    } while (page <= totalPages);
-
-    return accounts;
+    const accounts = await readCloudflareList({ client: this.cloudflareClient, path: "accounts", perPage: this.perPage,
+      query: { direction: "asc" }, errorMessage: "Cloudflare 账号列表读取失败" });
+    return accounts.map(normalizeAccount);
   }
 
   async resolveAccountId(accountId = "") {
@@ -396,49 +375,10 @@ export class DeveloperResourcesService {
   }
 
   async listResourceItems(definition, accountId) {
-    const resources = [];
-    let page = 1;
-    let totalPages = 1;
-    let cursor = "";
-
-    do {
-      const payload = await this.cloudflareClient.get(definition.listPath(accountId), {
-        page,
-        per_page: definition.perPage || this.perPage,
-        ...(cursor ? { cursor } : {}),
-        ...(definition.listQuery || {}),
-      });
-      const pageResources = listFromPayload(payload, definition.listKeys);
-
-      if (!Array.isArray(pageResources)) {
-        throw new HttpError(502, "Cloudflare 资源列表返回格式异常，请稍后重试。");
-      }
-
-      resources.push(...pageResources);
-
-      const nextCursor =
-        payload.result_info?.cursor ||
-        payload.result?.cursor ||
-        payload.result_info?.cursors?.after ||
-        "";
-
-      if (nextCursor && nextCursor !== cursor) {
-        cursor = nextCursor;
-        page += 1;
-        totalPages = page;
-        continue;
-      }
-
-      cursor = "";
-      const reportedTotalPages = Number(payload.result_info?.total_pages);
-      totalPages =
-        Number.isFinite(reportedTotalPages) && reportedTotalPages >= page
-          ? reportedTotalPages
-          : page;
-      page += 1;
-    } while (cursor || page <= totalPages);
-
-    return resources;
+    return readCloudflareList({ client: this.cloudflareClient, path: definition.listPath(accountId),
+      perPage: definition.perPage || this.perPage, query: definition.listQuery || {}, keys: definition.listKeys,
+      identity: item => definition.normalize(item).id, pagination: definition.pagination || "page",
+      errorMessage: "Cloudflare 资源列表读取失败" });
   }
 
   async create(type, accountId = "", input = {}) {
