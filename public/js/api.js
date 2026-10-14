@@ -766,6 +766,15 @@ export async function fetchKvValue(resourceId, key, accountId = "") {
   return payload.value;
 }
 
+export async function fetchKvKeys(resourceId, accountId = "", { prefix = "", cursor = "", limit = 50, signal } = {}) {
+  const params = new URLSearchParams(accountId ? { accountId } : {});
+  if (prefix) params.set("prefix", prefix);
+  if (cursor) params.set("cursor", cursor);
+  params.set("limit", String(limit));
+  const response = await apiFetch(`/api/developer-resources/kv/${encodeURIComponent(resourceId)}/keys?${params}`, { signal });
+  return (await readJson(response, "读取 KV Key 列表失败")).page;
+}
+
 export async function putKvValue(resourceId, request) {
   const response = await apiFetch(
     `/api/developer-resources/kv/${encodeURIComponent(resourceId)}/values`,

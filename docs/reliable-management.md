@@ -41,6 +41,18 @@ DNS 工具栏新增“刷新 DNS 记录”，加载时禁用，超时结束后�
 
 详情读取、编辑、删除和测试均要求登录；状态修改请求继续检查 CSRF 和同源。详情仅向已登录管理员展示完整邮箱，接口和日志不返回 API Key。
 
+## KV Key 分页与编辑
+
+KV 命名空间详情默认读取 50 个 Key，点击“加载更多”继续浏览。搜索按 Key 名称前缀匹配，支持中文，区分大小写；这是 Cloudflare 前缀查询，不是 Value 内容搜索。改变筛选或点击“清除筛选”从第一页开始；“刷新 Key 列表”重新读取当前筛选的第一页。
+
+已加载的 Key 按名称去重。读取下一页失败时保留现有列表和游标，可手动重试。空页仍有游标时允许继续加载；游标重复或循环时报告异常，需刷新后继续，不自动扫描整个命名空间。页面显示已加载数量，不将其当作命名空间总数。
+
+搜索、分页、刷新及保存后的列表更新会保留编辑框内容。输入新草稿、保存或删除会让较早的 Value 读取响应失效；只有成功读取后才一起替换 Key 与 Value，读取失败保留原编辑内容。写入期间禁用重复提交和其他 Key 的读取、删除。保存过程中继续编辑会保留新草稿，并提示当前内容尚未保存。关闭详情、换命名空间或换账号会清空该编辑内容；草稿仅存在当前页面内存，不自动保存。
+
+新增只读接口 `GET /api/developer-resources/kv/:namespaceId/keys`，参数 `accountId`、`prefix`、`cursor`、`limit`，返回 `{page: {accountId, namespaceId, keys, prefix, limit, cursor, hasMore}}`。接口检查管理员登录和当前凭据可访问的 Cloudflare Account；每页 10-1000 条（默认 50），前缀最多 512 字节，面板限制游标为 4096 字节并原样传递。既有详情的 `extras.keys` 数组继续保留，新增 `extras.keyPage` 分页信息。
+
+保存或删除后刷新当前前缀的第一页。分页不是固定快照，外部写入和 KV 的数据传播可能改变结果，必要时手动刷新。接口和页面不新增自动重试写入，也不需要数据库迁移或新的环境变量。API 参数依据 [Cloudflare KV Key 列表文档](https://developers.cloudflare.com/api/resources/kv/subresources/namespaces/subresources/keys/methods/list/)；验证使用隔离模拟服务，包含 106 个 Key、中文前缀、失败重试、旧响应保护、读写竞态及 390px 手机布局。
+
 ## 验证与发布
 
 PR 检查以只读权限运行语法检查、Node 回归和 Playwright 浏览器测试，不使用生产账号或发布密钥。主分支的 Docker 构建与发布流程继续保留。

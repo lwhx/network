@@ -99,6 +99,14 @@ export class DeveloperResourcesController {
     return { statusCode: 200, body: result };
   };
 
+  listKvKeys = async ({ params, url }) => {
+    const page = await this.developerResourcesService.listKvKeysPage(
+      url.searchParams.get("accountId"), params.resourceId,
+      { prefix: url.searchParams.get("prefix"), cursor: url.searchParams.get("cursor"), limit: url.searchParams.get("limit") }
+    );
+    return { statusCode: 200, body: { page } };
+  };
+
   getKvValue = async ({ params, url }) => {
     const value = await this.developerResourcesService.getKvValue(
       url.searchParams.get("accountId"),

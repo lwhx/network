@@ -435,6 +435,27 @@
   padding: 8px 10px;
 }
 
+.kv-keys-search,
+.kv-keys-tools {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.kv-keys-search .devres-field,
+.kv-keys-tools p {
+  flex: 1;
+  min-width: 0;
+}
+
+.kv-keys-more { margin-top: 12px; }
+
+@media (max-width: 760px) {
+  .kv-keys-search,
+  .kv-keys-tools { flex-direction: column; align-items: stretch; }
+}
+
 .devres-detail-row span {
   min-width: 0;
   flex: 1 1 auto;

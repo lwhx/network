@@ -4,6 +4,7 @@ import {
   fetchDeveloperResourceDetail,
   fetchDeveloperResources,
   fetchKvValue,
+  fetchKvKeys,
   fetchTunnelToken,
   putKvValue,
   putR2Object,
@@ -14,7 +15,7 @@ import {
   savePagesBuildConfig,
   saveTunnelConfiguration,
 } from "../api.js";
-import { state } from "../state.js";
+import { state, resetKvDetailState } from "../state.js";
 import { beginScopedRequest, captureRequestContext } from "../request-scope.js";
 
 const cloudflareResourceTypes = new Set(["pages", "d1", "r2", "kv", "tunnels"]);
@@ -57,6 +58,7 @@ function resetResourceModal() {
 
 function clearResourceDetail() {
   resourceDetailRevision += 1;
+  resetKvDetailState();
   state.developerResourceActiveId = "";
   state.developerResourceDetail = null;
   state.developerResourceDetailLoading = false;
@@ -124,7 +126,7 @@ function readResourceModalContext() {
 }
 
 function readKvContext() {
-  return JSON.stringify([readResourceDetailContext(), state.developerResourceKvKey]);
+  return JSON.stringify([readResourceDetailContext(), state.developerResourceKvEditorRevision]);
 }
 
 export function createDeveloperResourcesActions({ renderApp }) {
@@ -210,8 +212,11 @@ export function createDeveloperResourcesActions({ renderApp }) {
       return;
     }
 
+    if (state.developerResourceActiveId !== resourceId || state.developerResourceDetail?.accountId !== activeAccountId()) resetKvDetailState();
     resourceDetailRevision += 1;
     state.developerResourceActiveId = resourceId;
+    state.developerResourceKvSaving = false;
+    state.developerResourceKvKeysLoading = false;
     state.developerResourceDetail = null;
     state.developerResourceDetailLoading = true;
     state.developerResourceDetailNotice = "";
@@ -230,6 +235,16 @@ export function createDeveloperResourcesActions({ renderApp }) {
         return;
       }
       state.developerResourceDetail = payload;
+      if (type === "kv") {
+        const page = payload.extras?.keyPage || {};
+        state.developerResourceKvCursor = page.cursor || "";
+        state.developerResourceKvHasMore = Boolean(page.hasMore);
+        state.developerResourceKvPrefix = page.prefix || "";
+        state.developerResourceKvPrefixDraft = page.prefix || "";
+        state.developerResourceKvSeenCursors = [];
+        state.developerResourceKvKeysLoading = false;
+        state.developerResourceKvKeysNotice = page.failed ? "Key 列表读取失败，请刷新列表重试。" : "";
+      }
     } catch (error) {
       if (!requestScope.isCurrent()) {
         return;
@@ -388,12 +403,66 @@ export function createDeveloperResourcesActions({ renderApp }) {
     }
   }
 
+  function syncKvEditor(event) {
+    const field = event.target.name;
+    if (field !== "key" && field !== "value") return;
+    state[field === "key" ? "developerResourceKvKey" : "developerResourceKvValue"] = event.target.value;
+    state.developerResourceKvEditorRevision += 1;
+    state.developerResourceDetailLoading = false;
+  }
+
+  function syncKvPrefix(event) { state.developerResourceKvPrefixDraft = event.target.value; }
+
+  async function loadKvKeys({ append = false } = {}) {
+    if (activeType() !== "kv" || !state.developerResourceActiveId || !state.developerResourceDetail) return;
+    if (append && (state.developerResourceKvKeysLoading || !state.developerResourceKvHasMore)) return;
+    const resourceId = state.developerResourceActiveId, accountId = activeAccountId();
+    const prefix = state.developerResourceKvPrefix, cursor = append ? state.developerResourceKvCursor : "";
+    const scope = beginScopedRequest("developer-resources:kvKeys", () => JSON.stringify([readResourceDetailContext(), state.developerResourceKvPrefix]));
+    state.developerResourceKvKeysLoading = true;
+    state.developerResourceKvKeysNotice = "";
+    renderApp();
+    try {
+      const page = await fetchKvKeys(resourceId, accountId, { prefix, cursor, signal: scope.signal });
+      if (!scope.isCurrent()) return;
+      if (page?.accountId !== accountId || page?.namespaceId !== resourceId || page?.prefix !== prefix || !Array.isArray(page?.keys)) {
+        throw new Error("Key 列表响应与当前账号或筛选条件不一致，请刷新重试。");
+      }
+      if (append && page.cursor && (page.cursor === cursor || state.developerResourceKvSeenCursors.includes(page.cursor))) {
+        state.developerResourceKvHasMore = false;
+        throw new Error("分页游标重复，请刷新 Key 列表后重试。");
+      }
+      const existing = append ? state.developerResourceDetail.extras.keys || [] : [];
+      const keys = [...new Map([...existing, ...page.keys].map(key => [key.name, key])).values()];
+      state.developerResourceDetail.extras.keys = keys;
+      state.developerResourceDetail.extras.keyPage = { prefix, cursor: page.cursor, hasMore: page.hasMore, limit: page.limit };
+      state.developerResourceDetail.warnings = (state.developerResourceDetail.warnings || []).filter(message => !message.startsWith("Key 列表读取失败："));
+      state.developerResourceKvSeenCursors = append ? [...state.developerResourceKvSeenCursors, cursor] : [];
+      state.developerResourceKvCursor = page.cursor;
+      state.developerResourceKvHasMore = page.hasMore;
+    } catch (error) {
+      if (!scope.isCurrent()) return;
+      state.developerResourceKvKeysNotice = error.message;
+    } finally {
+      if (scope.isCurrent()) { state.developerResourceKvKeysLoading = false; renderApp(); }
+    }
+  }
+
+  async function filterKvKeys(event) {
+    event?.preventDefault();
+    state.developerResourceKvPrefix = state.developerResourceKvPrefixDraft;
+    state.developerResourceKvCursor = "";
+    state.developerResourceKvHasMore = false;
+    state.developerResourceKvSeenCursors = [];
+    if (state.developerResourceDetail) state.developerResourceDetail.extras.keys = [];
+    await loadKvKeys();
+  }
+
   async function readKvValue(key) {
-    if (!key) {
+    if (!key || state.developerResourceKvSaving) {
       return;
     }
 
-    state.developerResourceKvKey = key;
     state.developerResourceDetailLoading = true;
     renderApp();
 
@@ -404,6 +473,7 @@ export function createDeveloperResourcesActions({ renderApp }) {
       if (!requestScope.isCurrent()) {
         return;
       }
+      state.developerResourceKvKey = key;
       state.developerResourceKvValue = value.value || "";
       state.developerResourceDetailNotice = "KV Value 已读取";
     } catch (error) {
@@ -421,9 +491,16 @@ export function createDeveloperResourcesActions({ renderApp }) {
 
   async function submitKvValue(event) {
     event.preventDefault();
+    if (state.developerResourceKvSaving) return;
     const formData = readForm("#kv-value-form");
     const key = String(formData.get("key") || "").trim();
     const value = String(formData.get("value") || "");
+    state.developerResourceKvKey = key;
+    state.developerResourceKvValue = value;
+    state.developerResourceKvEditorRevision += 1;
+    state.developerResourceDetailLoading = false;
+    state.developerResourceKvSaving = true;
+    renderApp();
 
     const requestScope = captureRequestContext(readResourceDetailContext);
 
@@ -436,8 +513,10 @@ export function createDeveloperResourcesActions({ renderApp }) {
       if (!requestScope.isCurrent()) {
         return;
       }
-      state.developerResourceDetailNotice = "KV Value 已保存";
-      await openDeveloperResourceDetail(state.developerResourceActiveId);
+      state.developerResourceDetailNotice = state.developerResourceKvKey === key && state.developerResourceKvValue === value
+        ? "KV Value 已保存" : "已提交的 Value 已保存；当前编辑内容尚未保存。";
+      state.developerResourceKvEditorRevision += 1;
+      await loadKvKeys();
       if (!requestScope.isCurrent()) {
         return;
       }
@@ -447,15 +526,21 @@ export function createDeveloperResourcesActions({ renderApp }) {
       }
       state.developerResourceDetailNotice = error.message;
       renderApp();
+    } finally {
+      if (requestScope.isCurrent()) { state.developerResourceKvSaving = false; renderApp(); }
     }
   }
 
   async function deleteKvValue(key) {
-    if (!key || !window.confirm("确定删除这个 KV Key 吗？")) {
+    if (!key || state.developerResourceKvSaving || !window.confirm("确定删除这个 KV Key 吗？")) {
       return;
     }
 
     const requestScope = captureRequestContext(readResourceDetailContext);
+    state.developerResourceKvEditorRevision += 1;
+    state.developerResourceDetailLoading = false;
+    state.developerResourceKvSaving = true;
+    renderApp();
 
     try {
       await removeKvValue(state.developerResourceActiveId, key, activeAccountId());
@@ -463,7 +548,8 @@ export function createDeveloperResourcesActions({ renderApp }) {
         return;
       }
       state.developerResourceDetailNotice = "KV Key 已删除";
-      await openDeveloperResourceDetail(state.developerResourceActiveId);
+      state.developerResourceKvEditorRevision += 1;
+      await loadKvKeys();
       if (!requestScope.isCurrent()) {
         return;
       }
@@ -473,6 +559,8 @@ export function createDeveloperResourcesActions({ renderApp }) {
       }
       state.developerResourceDetailNotice = error.message;
       renderApp();
+    } finally {
+      if (requestScope.isCurrent()) { state.developerResourceKvSaving = false; renderApp(); }
     }
   }
 
@@ -762,6 +850,9 @@ export function createDeveloperResourcesActions({ renderApp }) {
   }
 
   return {
+    syncKvEditor, syncKvPrefix, filterKvKeys, loadKvKeys,
+    loadMoreKvKeys: () => loadKvKeys({ append: true }),
+    clearKvPrefix: async () => { state.developerResourceKvPrefixDraft = ""; await filterKvKeys(); },
     changeDeveloperResourceAccount,
     closeDeveloperResourceModal,
     closeDeveloperResourceDetail,

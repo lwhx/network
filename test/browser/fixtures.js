@@ -13,6 +13,8 @@ export const password = "Browser-password-123!";
 export const setupToken = "browser-only-setup-token";
 export const zoneA = "a".repeat(32);
 export const zoneB = "b".repeat(32);
+export const kvNamespaceA = "f".repeat(32);
+export const kvNamespaceB = "1".repeat(32);
 export const zones = [
   { id: zoneA, name: "alpha.example", status: "active", plan: { name: "Free" } },
   { id: zoneB, name: "beta.example", status: "active", plan: { name: "Free" } },
@@ -60,13 +62,19 @@ async function createPanel({ seed, cloudflareTimeoutMs }) {
   ]);
   const rejectedCreates = new Set();
   const stalledResponses = [];
+  const kvValues = new Map([
+    [kvNamespaceA, new Map([...Array.from({ length: 105 }, (_, index) => [`config:${String(index).padStart(3, "0")}`, `value-${index}`]), ["配置:中文", "中文内容"]])],
+    [kvNamespaceB, new Map([["other:only", "other namespace value"]])],
+  ]);
+  let rejectKvPage = false;
   let nextRecord = 100;
   // This mock is the only Cloudflare endpoint used by the app; no external credentials or API calls.
   const mock = createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
-    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : null;
+    const text = Buffer.concat(chunks).toString();
+    const body = text ? (request.headers["content-type"]?.includes("application/json") ? JSON.parse(text) : text) : null;
     calls.push({ method: request.method, path: url.pathname, body,
       email: request.headers["x-auth-email"], apiKey: request.headers["x-auth-key"] });
     let result;
@@ -94,7 +102,35 @@ async function createPanel({ seed, cloudflareTimeoutMs }) {
         result = { ...body, id: String(nextRecord++).padStart(32, "0") };
         records.get(id).push(result);
       } else result = records.get(id);
-    } else if (url.pathname === "/user") result = { id: "mock-user" };
+    } else if (url.pathname === `/accounts/${"e".repeat(32)}/storage/kv/namespaces`) result = [
+      { id: kvNamespaceA, title: "CONFIG" }, { id: kvNamespaceB, title: "OTHER" },
+    ];
+    else if (url.pathname.match(/^\/accounts\/[a-f0-9]{32}\/storage\/kv\/namespaces\/[a-f0-9]{32}(?:\/keys|\/values\/.*)?$/)) {
+      const [, , , , , , namespaceId, action, encodedKey] = url.pathname.split("/");
+      const values = kvValues.get(namespaceId);
+      if (!values) { response.writeHead(404); response.end(); return; }
+      if (action === "keys") {
+        if (rejectKvPage) { rejectKvPage = false; response.writeHead(503, { "Content-Type": "application/json" });
+          response.end(JSON.stringify({ success: false, errors: [{ message: "Injected KV page failure" }] })); return; }
+        const prefix = url.searchParams.get("prefix") || "";
+        const offset = Number((url.searchParams.get("cursor") || "page:0").slice(5));
+        const limit = Number(url.searchParams.get("limit") || 50);
+        const all = [...values.keys()].filter(key => key.startsWith(prefix));
+        const keys = all.slice(offset, offset + limit).map(name => ({ name }));
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ success: true, result: keys, result_info: { count: keys.length,
+          cursor: offset + limit < all.length ? `page:${offset + limit}` : "" } })); return;
+      }
+      if (action === "values") {
+        const key = decodeURIComponent(encodedKey);
+        if (request.method === "PUT") { values.set(key, String(body ?? "")); response.writeHead(200); response.end(); return; }
+        if (request.method === "DELETE") { values.delete(key); response.writeHead(204); response.end(); return; }
+        response.writeHead(values.has(key) ? 200 : 404, { "Content-Type": "text/plain" });
+        response.end(values.get(key) || ""); return;
+      }
+      result = { id: namespaceId, title: namespaceId === kvNamespaceA ? "CONFIG" : "OTHER" };
+    }
+    else if (url.pathname === "/user") result = { id: "mock-user" };
     else if (url.pathname === "/accounts") result = [{ id: "e".repeat(32), name: "Mock account" }];
     else {
       response.writeHead(404, { "Content-Type": "application/json" });
@@ -136,6 +172,7 @@ async function createPanel({ seed, cloudflareTimeoutMs }) {
     recordContent() { return records.get(zoneA)[0].content; },
     rejectNextCreate(name) { rejectedCreates.add(name); },
     stallNextResponse(method, path) { stalledResponses.push({ method, path }); },
+    rejectNextKvPage() { rejectKvPage = true; },
     async restart() {
       if (server) { await close(server); container.sqliteStore.close(); }
       container = createContainer(config);
