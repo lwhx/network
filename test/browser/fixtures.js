@@ -51,7 +51,7 @@ async function close(server) {
   await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 }
 
-async function createPanel({ seed }) {
+async function createPanel({ seed, cloudflareTimeoutMs }) {
   const dataDir = await mkdtemp(join(tmpdir(), "network-browser-"));
   const calls = [];
   const records = new Map([
@@ -59,6 +59,7 @@ async function createPanel({ seed }) {
     [zoneB, [dnsRecord(zoneB, "new.beta.example")]],
   ]);
   const rejectedCreates = new Set();
+  const stalledResponses = [];
   let nextRecord = 100;
   // This mock is the only Cloudflare endpoint used by the app; no external credentials or API calls.
   const mock = createServer(async (request, response) => {
@@ -100,11 +101,19 @@ async function createPanel({ seed }) {
       response.end(JSON.stringify({ success: false, errors: [{ message: `Unexpected mock endpoint: ${url.pathname}` }] }));
       return;
     }
+    const stallIndex = stalledResponses.findIndex(item => item.method === request.method && item.path === url.pathname);
+    if (stallIndex >= 0) {
+      stalledResponses.splice(stallIndex, 1);
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.write('{"success":true,"result":');
+      return;
+    }
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ success: true, result, result_info: { page: 1, total_pages: 1 }, errors: [] }));
   });
   const mockOrigin = await listen(mock);
-  const config = createConfig({ DATA_DIR: dataDir, SETUP_TOKEN: setupToken, CLOUDFLARE_API_BASE_URL: mockOrigin });
+  const config = createConfig({ DATA_DIR: dataDir, SETUP_TOKEN: setupToken, CLOUDFLARE_API_BASE_URL: mockOrigin,
+    CLOUDFLARE_REQUEST_TIMEOUT_MS: String(cloudflareTimeoutMs) });
   let container;
   let server;
   let port = 0;
@@ -126,6 +135,7 @@ async function createPanel({ seed }) {
     },
     recordContent() { return records.get(zoneA)[0].content; },
     rejectNextCreate(name) { rejectedCreates.add(name); },
+    stallNextResponse(method, path) { stalledResponses.push({ method, path }); },
     async restart() {
       if (server) { await close(server); container.sqliteStore.close(); }
       container = createContainer(config);
@@ -153,8 +163,9 @@ async function createPanel({ seed }) {
 
 export const test = base.extend({
   seeded: [true, { option: true }],
-  panel: async ({ seeded }, use) => {
-    const panel = await createPanel({ seed: seeded });
+  cloudflareTimeoutMs: [15_000, { option: true }],
+  panel: async ({ seeded, cloudflareTimeoutMs }, use) => {
+    const panel = await createPanel({ seed: seeded, cloudflareTimeoutMs });
     try { await use(panel); } finally { await panel.dispose(); }
   },
 });

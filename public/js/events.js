@@ -61,6 +61,7 @@ export function bindEvents(actions) {
   document.querySelector("#open-dns-form")?.addEventListener("click", actions.openCreateDnsForm);
   document.querySelector("#open-dns-bulk-form")?.addEventListener("click", actions.openDnsBulkForm);
   document.querySelector("#dns-record-form")?.addEventListener("submit", actions.saveDnsRecord);
+  document.querySelector("#refresh-dns")?.addEventListener("click", actions.loadDnsRecords);
   document.querySelector("#dns-bulk-form")?.addEventListener("submit", actions.submitDnsBulk);
   document.querySelector("#cancel-dns-edit")?.addEventListener("click", actions.resetDnsForm);
   document.querySelector("#reset-dns-form")?.addEventListener("click", actions.resetDnsForm);

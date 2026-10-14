@@ -53,6 +53,10 @@ export function renderDnsView() {
         ${icon("upload")}
         <span>批量添加 DNS 记录</span>
       </button>
+      <button class="secondary-button dns-toolbar-button" type="button" id="refresh-dns" ${state.loadingDns ? "disabled" : ""}>
+        ${icon("refresh")}
+        <span>${state.loadingDns ? "读取中" : "刷新 DNS 记录"}</span>
+      </button>
     </div>
 
     ${state.dnsFormOpen ? renderDnsForm() : ""}
