@@ -72,6 +72,9 @@ function matchRoute(method, pathname) {
     /^\/api\/developer-resources\/kv\/(?<resourceId>[^/]{1,256})\/values$/i
   );
 
+  const kvKeysMatch = pathname.match(/^\/api\/developer-resources\/kv\/(?<resourceId>[^/]{1,256})\/keys$/i);
+  if (kvKeysMatch) return { key: `${method} /api/developer-resources/kv/:resourceId/keys`, params: { ...kvKeysMatch.groups, type: "kv" } };
+
   if (developerResourceKvValueMatch) {
     return {
       key: `${method} /api/developer-resources/kv/:resourceId/values`,
@@ -648,6 +651,7 @@ export function createApiRouter({
       "GET /api/developer-resources/kv/:resourceId/values",
       developerResourcesController.getKvValue,
     ],
+    ["GET /api/developer-resources/kv/:resourceId/keys", developerResourcesController.listKvKeys],
     [
       "PUT /api/developer-resources/kv/:resourceId/values",
       developerResourcesController.putKvValue,

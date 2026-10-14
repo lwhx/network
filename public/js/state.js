@@ -183,6 +183,15 @@ export const state = {
   developerResourceSqlDraft: "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;",
   developerResourceKvKey: "",
   developerResourceKvValue: "",
+  developerResourceKvPrefix: "",
+  developerResourceKvPrefixDraft: "",
+  developerResourceKvCursor: "",
+  developerResourceKvHasMore: false,
+  developerResourceKvSeenCursors: [],
+  developerResourceKvKeysLoading: false,
+  developerResourceKvKeysNotice: "",
+  developerResourceKvEditorRevision: 0,
+  developerResourceKvSaving: false,
   developerResourceR2Key: "",
   developerResourceR2Content: "",
   developerResourceTunnelToken: null,
@@ -347,7 +356,7 @@ export function resetPendingResourceState() {
   state.speedTaskDetail = null;
   const booleanFlags = ["loadingAnalytics", "loadingPageRules", "loadingSslSettings", "loadingCertificates", "loadingDns", "loadingCacheSettings", "loadingFirewallRules",
     "addingDomain", "savingDns", "savingDnsBulk", "deletingDnsBulk", "savingCacheSettings", "savingSslSettings", "savingCertificate", "purgingCache", "savingFirewallRule", "savingRulesetRule", "savingPageRule",
-    "speedDeploying", "speedDomainsLoading", "automationLoading", "automationApplying", "workersLoading", "workersLoadingDetail", "workersSaving", "workersRoutesLoading", "developerResourceDetailLoading", "developerResourceLoading", "developerResourceSaving", "operationHistoryLoading"];
+    "speedDeploying", "speedDomainsLoading", "automationLoading", "automationApplying", "workersLoading", "workersLoadingDetail", "workersSaving", "workersRoutesLoading", "developerResourceDetailLoading", "developerResourceLoading", "developerResourceSaving", "developerResourceKvKeysLoading", "developerResourceKvSaving", "operationHistoryLoading"];
   for (const key of booleanFlags) state[key] = false;
   for (const key of ["deletingFirewallRuleId", "deletingPageRuleId", "deletingCertificateId", "updatingFirewallRuleId", "updatingPageRuleId", "speedDomainDeleteId", "automationPendingKey", "workersPendingKey"]) state[key] = "";
 }
@@ -454,8 +463,7 @@ export function resetDeveloperResourcesState() {
   state.developerResourceDetailLoading = false;
   state.developerResourceDetailNotice = "";
   state.developerResourceSqlDraft = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;";
-  state.developerResourceKvKey = "";
-  state.developerResourceKvValue = "";
+  resetKvDetailState();
   state.developerResourceR2Key = "";
   state.developerResourceR2Content = "";
   state.developerResourceTunnelToken = null;
@@ -470,6 +478,20 @@ export function resetDeveloperResourcesState() {
   state.workerTemplates = [];
   state.workerTemplateModal = "";
   state.workerTemplateNotice = "";
+}
+
+export function resetKvDetailState() {
+  state.developerResourceKvKey = "";
+  state.developerResourceKvValue = "";
+  state.developerResourceKvPrefix = "";
+  state.developerResourceKvPrefixDraft = "";
+  state.developerResourceKvCursor = "";
+  state.developerResourceKvHasMore = false;
+  state.developerResourceKvSeenCursors = [];
+  state.developerResourceKvKeysLoading = false;
+  state.developerResourceKvKeysNotice = "";
+  state.developerResourceKvEditorRevision = 0;
+  state.developerResourceKvSaving = false;
 }
 
 export function resetOperationHistoryState() {

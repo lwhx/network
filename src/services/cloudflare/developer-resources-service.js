@@ -125,6 +125,18 @@ function normalizeKvKey(key = {}) {
   };
 }
 
+function kvPageOptions(options = {}) {
+  const prefix = options.prefix ?? "";
+  const cursor = options.cursor ?? "";
+  const limit = options.limit == null || options.limit === "" ? 50 : Number(options.limit);
+  if (typeof prefix !== "string" || Buffer.byteLength(prefix) > 512 ||
+      typeof cursor !== "string" || Buffer.byteLength(cursor) > 4096 ||
+      !Number.isInteger(limit) || limit < 10 || limit > 1000) {
+    throw new HttpError(400, "KV 分页参数无效：每页 10-1000 条，前缀最多 512 字节。");
+  }
+  return { prefix, cursor, limit };
+}
+
 function normalizePagesProject(project = {}) {
   const deployment = project.latest_deployment || project.canonical_deployment || {};
 
@@ -515,10 +527,15 @@ export class DeveloperResourcesService {
 
     if (resourceType === "kv") {
       detail.item = await this.getKvNamespace(resolved.accountId, id);
-      detail.extras.keys = await this.listKvKeys(resolved.accountId, id).catch((error) => {
+      detail.extras.keys = [];
+      detail.extras.keyPage = { cursor: "", hasMore: false, prefix: "", limit: 50, failed: true };
+      try {
+        const page = await this.readKvKeysPage(resolved.accountId, id);
+        detail.extras.keys = page.keys;
+        detail.extras.keyPage = { cursor: page.cursor, hasMore: page.hasMore, prefix: page.prefix, limit: page.limit };
+      } catch (error) {
         warnings.push(`Key 列表读取失败：${error.message}`);
-        return [];
-      });
+      }
       return detail;
     }
 
@@ -711,18 +728,32 @@ export class DeveloperResourcesService {
   }
 
   async listKvKeys(accountId, namespaceId, options = {}) {
+    return (await this.readKvKeysPage(accountId, namespaceId, options)).keys;
+  }
+
+  async listKvKeysPage(accountId = "", namespaceId, options = {}) {
     assertCloudflareResourceId(namespaceId, "KV 命名空间 ID");
+    const query = kvPageOptions(options);
+    const resolved = await this.resolveAccountId(accountId);
+    return this.readKvKeysPage(resolved.accountId, namespaceId, query);
+  }
+
+  async readKvKeysPage(accountId, namespaceId, options = {}) {
+    assertCloudflareId(accountId, "账号 ID");
+    assertCloudflareResourceId(namespaceId, "KV 命名空间 ID");
+    const query = kvPageOptions(options);
     const payload = await this.cloudflareClient.get(
       `accounts/${accountId}/storage/kv/namespaces/${namespaceId}/keys`,
-      {
-        prefix: options.prefix,
-        cursor: options.cursor,
-        limit: options.limit || 50,
-      }
+      query
     );
-    const keys = listFromPayload(payload, ["keys"]) || [];
-
-    return keys.map(normalizeKvKey);
+    const keys = listFromPayload(payload, ["keys"]);
+    const cursor = payload.result_info?.cursor ?? "";
+    if (!Array.isArray(keys) || keys.some(key => typeof key?.name !== "string" || !key.name) ||
+        typeof cursor !== "string" || Buffer.byteLength(cursor) > 4096 || (cursor && cursor === query.cursor)) {
+      throw new HttpError(502, "Cloudflare KV Key 列表或分页游标异常，请刷新列表后重试。");
+    }
+    return { accountId, namespaceId, keys: keys.map(normalizeKvKey), prefix: query.prefix, limit: query.limit,
+      cursor, hasMore: Boolean(cursor) };
   }
 
   async getKvValue(accountId = "", namespaceId = "", key = "") {

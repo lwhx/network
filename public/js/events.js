@@ -235,6 +235,12 @@ export function bindEvents(actions) {
   document.querySelector("#d1-query-form")?.addEventListener("submit", actions.submitD1Query);
   document.querySelector("#r2-object-form")?.addEventListener("submit", actions.submitR2Object);
   document.querySelector("#kv-value-form")?.addEventListener("submit", actions.submitKvValue);
+  document.querySelectorAll("#kv-value-form input, #kv-value-form textarea").forEach(input => input.addEventListener("input", actions.syncKvEditor));
+  document.querySelector('#kv-keys-search-form [name="prefix"]')?.addEventListener("input", actions.syncKvPrefix);
+  document.querySelector("#kv-keys-search-form")?.addEventListener("submit", actions.filterKvKeys);
+  document.querySelector("#kv-keys-clear")?.addEventListener("click", actions.clearKvPrefix);
+  document.querySelector("#kv-keys-refresh")?.addEventListener("click", actions.loadKvKeys);
+  document.querySelector("#kv-keys-more")?.addEventListener("click", actions.loadMoreKvKeys);
   document
     .querySelector("#tunnel-config-form")
     ?.addEventListener("submit", actions.submitTunnelConfiguration);

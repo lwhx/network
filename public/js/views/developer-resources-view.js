@@ -401,17 +401,33 @@ function renderKvDetail(detail) {
         <span>Value</span>
         <textarea name="value">${escapeHtml(state.developerResourceKvValue)}</textarea>
       </label>
-      <button class="devres-primary-button" type="submit">保存 Value</button>
+      <button class="devres-primary-button" type="submit" ${state.developerResourceKvSaving ? "disabled" : ""}>${state.developerResourceKvSaving ? "处理中" : "保存 Value"}</button>
     </form>
-    <section>
+    <section aria-label="KV Key 列表">
       <h3>Key 列表</h3>
-      ${renderSimpleList(keys, "暂无 Key", (item) => `
+      <form class="kv-keys-search" id="kv-keys-search-form">
+        <label class="devres-field">
+          <span>按 Key 前缀搜索</span>
+          <input name="prefix" maxlength="512" placeholder="例如 config:" value="${escapeHtml(state.developerResourceKvPrefixDraft)}" />
+        </label>
+        <button class="devres-outline-button" type="submit">搜索</button>
+        <button class="devres-outline-button" id="kv-keys-clear" type="button">清除筛选</button>
+      </form>
+      <div class="kv-keys-tools">
+        <p class="devres-muted" aria-live="polite">已加载 ${keys.length} 个 Key${state.developerResourceKvHasMore ? "，还有更多" : ""}</p>
+        <button class="devres-outline-button" id="kv-keys-refresh" type="button" ${state.developerResourceKvKeysLoading ? "disabled" : ""}>刷新 Key 列表</button>
+      </div>
+      ${state.developerResourceKvKeysNotice ? `<p class="devres-notice" id="kv-keys-notice" role="status">${escapeHtml(state.developerResourceKvKeysNotice)}</p>` : ""}
+      <div id="kv-key-list">
+      ${renderSimpleList(keys, state.developerResourceKvKeysLoading ? "正在读取 Key" : state.developerResourceKvKeysNotice ? "请重试读取 Key 列表" : state.developerResourceKvPrefix ? "没有匹配的 Key" : "暂无 Key", (item) => `
         <div class="devres-detail-row">
-          <span>${escapeHtml(item.name)}</span>
-          <button class="devres-outline-button kv-key-read" type="button" data-kv-key="${escapeHtml(item.name)}">读取</button>
-          <button class="devres-icon-danger kv-key-delete" type="button" data-kv-key="${escapeHtml(item.name)}">${icon("trash")}</button>
+          <span title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
+          <button class="devres-outline-button kv-key-read" type="button" data-kv-key="${escapeHtml(item.name)}" ${state.developerResourceKvSaving ? "disabled" : ""}>读取</button>
+          <button class="devres-icon-danger kv-key-delete" type="button" data-kv-key="${escapeHtml(item.name)}" ${state.developerResourceKvSaving ? "disabled" : ""}>${icon("trash")}</button>
         </div>
       `)}
+      </div>
+      <button class="devres-outline-button kv-keys-more" id="kv-keys-more" type="button" ${state.developerResourceKvKeysLoading || !state.developerResourceKvHasMore ? "disabled" : ""}>${state.developerResourceKvKeysLoading ? "读取中" : state.developerResourceKvHasMore ? "加载更多" : state.developerResourceKvKeysNotice ? "请刷新列表重试" : "没有更多 Key"}</button>
     </section>
   `;
 }
