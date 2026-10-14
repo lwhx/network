@@ -53,7 +53,7 @@ async function close(server) {
   await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 }
 
-async function createPanel({ seed, cloudflareTimeoutMs }) {
+async function createPanel({ seed, cloudflareTimeoutMs, largeLists }) {
   const dataDir = await mkdtemp(join(tmpdir(), "network-browser-"));
   const calls = [];
   const records = new Map([
@@ -66,6 +66,17 @@ async function createPanel({ seed, cloudflareTimeoutMs }) {
     [kvNamespaceA, new Map([...Array.from({ length: 105 }, (_, index) => [`config:${String(index).padStart(3, "0")}`, `value-${index}`]), ["配置:中文", "中文内容"]])],
     [kvNamespaceB, new Map([["other:only", "other namespace value"]])],
   ]);
+  const remoteAccounts = [{ id: "e".repeat(32), name: "Mock account" }];
+  const namespaces = [{ id: kvNamespaceA, title: "CONFIG" }, { id: kvNamespaceB, title: "OTHER" }];
+  const zoneItems = [...zones];
+  if (largeLists) {
+    remoteAccounts.push(...Array.from({ length: 50 }, (_, index) => ({ id: String(2000 + index).padStart(32, "0"), name: `Extra account ${index}` })));
+    zoneItems.push(...Array.from({ length: 53 }, (_, index) => ({ id: String(3000 + index).padStart(32, "0"), name: `extra-${index}.example`, status: "active", plan: { name: "Free" } })));
+    records.get(zoneA).push(...Array.from({ length: 100 }, (_, index) => ({ ...dnsRecord(zoneA, `record-${index}.alpha.example`), id: String(4000 + index).padStart(32, "0") })));
+    namespaces.push(...Array.from({ length: 53 }, (_, index) => ({ id: String(200 + index).padStart(32, "0"), title: `EXTRA-${index}` })));
+    for (const namespace of namespaces.slice(2)) kvValues.set(namespace.id, new Map([["example:key", "value"]]));
+  }
+  let rejectDnsPage2 = false;
   let rejectKvPage = false;
   let nextRecord = 100;
   // This mock is the only Cloudflare endpoint used by the app; no external credentials or API calls.
@@ -75,10 +86,10 @@ async function createPanel({ seed, cloudflareTimeoutMs }) {
     for await (const chunk of request) chunks.push(chunk);
     const text = Buffer.concat(chunks).toString();
     const body = text ? (request.headers["content-type"]?.includes("application/json") ? JSON.parse(text) : text) : null;
-    calls.push({ method: request.method, path: url.pathname, body,
+    calls.push({ method: request.method, path: url.pathname, body, query: Object.fromEntries(url.searchParams),
       email: request.headers["x-auth-email"], apiKey: request.headers["x-auth-key"] });
     let result;
-    if (url.pathname === "/zones") result = zones;
+    if (url.pathname === "/zones") result = zoneItems;
     else if (url.pathname.match(/^\/zones\/[a-f0-9]{32}\/dns_records\/[a-f0-9]{32}$/)) {
       const [, , zoneId, , recordId] = url.pathname.split("/");
       const items = records.get(zoneId);
@@ -101,10 +112,14 @@ async function createPanel({ seed, cloudflareTimeoutMs }) {
         }
         result = { ...body, id: String(nextRecord++).padStart(32, "0") };
         records.get(id).push(result);
-      } else result = records.get(id);
-    } else if (url.pathname === `/accounts/${"e".repeat(32)}/storage/kv/namespaces`) result = [
-      { id: kvNamespaceA, title: "CONFIG" }, { id: kvNamespaceB, title: "OTHER" },
-    ];
+      } else {
+        if (rejectDnsPage2 && url.searchParams.get("page") === "2") {
+          rejectDnsPage2 = false; response.writeHead(503, { "Content-Type": "application/json" });
+          response.end(JSON.stringify({ success: false, errors: [{ message: "Injected DNS page failure" }] })); return;
+        }
+        result = records.get(id);
+      }
+    } else if (url.pathname.match(/^\/accounts\/[a-f0-9]{32}\/storage\/kv\/namespaces$/)) result = namespaces;
     else if (url.pathname.match(/^\/accounts\/[a-f0-9]{32}\/storage\/kv\/namespaces\/[a-f0-9]{32}(?:\/keys|\/values\/.*)?$/)) {
       const [, , , , , , namespaceId, action, encodedKey] = url.pathname.split("/");
       const values = kvValues.get(namespaceId);
@@ -128,10 +143,10 @@ async function createPanel({ seed, cloudflareTimeoutMs }) {
         response.writeHead(values.has(key) ? 200 : 404, { "Content-Type": "text/plain" });
         response.end(values.get(key) || ""); return;
       }
-      result = { id: namespaceId, title: namespaceId === kvNamespaceA ? "CONFIG" : "OTHER" };
+      result = namespaces.find(item => item.id === namespaceId);
     }
     else if (url.pathname === "/user") result = { id: "mock-user" };
-    else if (url.pathname === "/accounts") result = [{ id: "e".repeat(32), name: "Mock account" }];
+    else if (url.pathname === "/accounts") result = remoteAccounts;
     else {
       response.writeHead(404, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ success: false, errors: [{ message: `Unexpected mock endpoint: ${url.pathname}` }] }));
@@ -145,6 +160,11 @@ async function createPanel({ seed, cloudflareTimeoutMs }) {
       return;
     }
     response.writeHead(200, { "Content-Type": "application/json" });
+    if (request.method === "GET" && Array.isArray(result)) {
+      const page = Number(url.searchParams.get("page") || 1), size = Number(url.searchParams.get("per_page") || 50);
+      const rows = result.slice((page - 1) * size, page * size);
+      response.end(JSON.stringify({ success: true, result: rows, result_info: { page, per_page: size, count: rows.length, total_count: result.length }, errors: [] })); return;
+    }
     response.end(JSON.stringify({ success: true, result, result_info: { page: 1, total_pages: 1 }, errors: [] }));
   });
   const mockOrigin = await listen(mock);
@@ -173,6 +193,7 @@ async function createPanel({ seed, cloudflareTimeoutMs }) {
     rejectNextCreate(name) { rejectedCreates.add(name); },
     stallNextResponse(method, path) { stalledResponses.push({ method, path }); },
     rejectNextKvPage() { rejectKvPage = true; },
+    rejectNextDnsPage2() { rejectDnsPage2 = true; },
     async restart() {
       if (server) { await close(server); container.sqliteStore.close(); }
       container = createContainer(config);
@@ -201,8 +222,9 @@ async function createPanel({ seed, cloudflareTimeoutMs }) {
 export const test = base.extend({
   seeded: [true, { option: true }],
   cloudflareTimeoutMs: [15_000, { option: true }],
-  panel: async ({ seeded, cloudflareTimeoutMs }, use) => {
-    const panel = await createPanel({ seed: seeded, cloudflareTimeoutMs });
+  largeLists: [false, { option: true }],
+  panel: async ({ seeded, cloudflareTimeoutMs, largeLists }, use) => {
+    const panel = await createPanel({ seed: seeded, cloudflareTimeoutMs, largeLists });
     try { await use(panel); } finally { await panel.dispose(); }
   },
 });

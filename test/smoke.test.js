@@ -232,7 +232,7 @@ test("lists all Cloudflare zones through paginated API responses", async () => {
         result,
         result_info: {
           page,
-          per_page: 50,
+          per_page: 1,
           total_pages: 2,
           total_count: 2,
         },

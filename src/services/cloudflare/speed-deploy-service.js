@@ -1,3 +1,4 @@
+import { readCloudflareList } from "./cloudflare-list-reader.js";
 import { normalizeDnsRecord } from "./dns-record-normalizer.js";
 import { SpeedDeployTransaction } from "./speed-deploy-transaction.js";
 
@@ -358,17 +359,8 @@ export class SpeedDeployService {
   }
 
   async listRawDnsRecords(zoneId) {
-    const records = [];
-    let page = 1;
-    let totalPages = 1;
-    do {
-      const payload = await this.cloudflareClient.get(`zones/${zoneId}/dns_records`, { page, per_page: 100 });
-      if (!Array.isArray(payload.result)) throw new HttpError(502, "Cloudflare DNS 返回格式异常");
-      records.push(...payload.result);
-      totalPages = Math.max(page, Number(payload.result_info?.total_pages) || page);
-      page += 1;
-    } while (page <= totalPages);
-    return records;
+    return readCloudflareList({ client: this.cloudflareClient, path: `zones/${zoneId}/dns_records`,
+      perPage: 100, errorMessage: "Cloudflare DNS 记录读取失败" });
   }
 
   async readFallbackOrigin(zoneId) {
@@ -595,33 +587,8 @@ export class SpeedDeployService {
   }
 
   async listCustomHostnames(zoneId) {
-    const hostnames = [];
-    let page = 1;
-    let totalPages = 1;
-
-    do {
-      const payload = await this.cloudflareClient.get(`zones/${zoneId}/custom_hostnames`, {
-        page,
-        per_page: 50,
-      });
-
-      if (!Array.isArray(payload.result)) {
-        throw new HttpError(502, "Cloudflare API 返回自定义主机名格式异常");
-      }
-
-      hostnames.push(...payload.result);
-
-      const pageCount = Number(payload.result_info?.total_pages);
-      const totalCount = Number(payload.result_info?.total_count);
-      totalPages = Number.isFinite(pageCount)
-        ? Math.max(1, pageCount)
-        : Number.isFinite(totalCount)
-          ? Math.max(1, Math.ceil(totalCount / 50))
-          : page;
-      page += 1;
-    } while (page <= totalPages);
-
-    return hostnames;
+    return readCloudflareList({ client: this.cloudflareClient, path: `zones/${zoneId}/custom_hostnames`,
+      perPage: 50, errorMessage: "Cloudflare 自定义主机名列表读取失败" });
   }
 }
 

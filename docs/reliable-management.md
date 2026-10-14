@@ -53,6 +53,16 @@ KV 命名空间详情默认读取 50 个 Key，点击“加载更多”继续浏
 
 保存或删除后刷新当前前缀的第一页。分页不是固定快照，外部写入和 KV 的数据传播可能改变结果，必要时手动刷新。接口和页面不新增自动重试写入，也不需要数据库迁移或新的环境变量。API 参数依据 [Cloudflare KV Key 列表文档](https://developers.cloudflare.com/api/resources/kv/subresources/namespaces/subresources/keys/methods/list/)；验证使用隔离模拟服务，包含 106 个 Key、中文前缀、失败重试、旧响应保护、读写竞态及 390px 手机布局。
 
+## 完整资源列表
+
+域名、DNS、Cloudflare Account、Pages/D1/KV/Tunnels 等开发资源列表使用统一分页读取。一键加速、自动化的 DNS 预检查及加速自定义主机名列表也使用该读取逻辑。编号分页优先使用 `total_pages` 或 `total_count`，并按服务端返回的 `per_page` 计算页数；缺少总数时，满页继续读取，短页结束。R2 桶列表按 `cursor` 继续读取，只传 `per_page` 和原样游标，不混入编号 `page`。
+
+全部页读取成功后才返回列表。后页省略总数或页大小时沿用前页已声明的值；明确变更时要求刷新重读。资源按标识去重，缺失标识、重复整页、异常页码、循环游标、互相矛盾的分页信息、提前空页或最终唯一记录数不等于声明总数时返回 502；后续页的远端错误保留原状态，不将已读子集当成完整结果。DNS 预检查读不全时，一键加速在写入前停止；后续页上存在类型冲突的访问域名 DNS 记录也会被识别。
+
+单个列表最多读取 1000 页、处理 100000 条记录，包含重复项。每次请求前后检查 60 秒的累计读取预算；这是软截止时间，已发出的请求仍受现有客户端单请求超时限制。列表不是固定快照，外部修改可能造成数量不一致，此时需手动刷新。此变更不添加缓存、自动重试或写入，不更改 KV Key 的按需分页，也不需要数据库迁移或新的环境变量。
+
+参数依据 [Cloudflare Accounts](https://developers.cloudflare.com/api/resources/accounts/methods/list/)、[KV 命名空间](https://developers.cloudflare.com/api/resources/kv/subresources/namespaces/methods/list/) 和 [R2 桶列表](https://developers.cloudflare.com/api/resources/r2/subresources/buckets/methods/list/) 文档。隔离回归覆盖仅有 `total_count` 的响应、后续账号授权、游标循环、总数缺失、异常终页和预检查零写入；浏览器使用 55 个域名、101 条 DNS、51 个 Cloudflare Account 和 55 个 KV 命名空间验证完整展示、后续账号切换、失败反馈与手动刷新。
+
 ## 验证与发布
 
 PR 检查以只读权限运行语法检查、Node 回归和 Playwright 浏览器测试，不使用生产账号或发布密钥。主分支的 Docker 构建与发布流程继续保留。

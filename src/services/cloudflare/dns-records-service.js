@@ -1,3 +1,4 @@
+import { readCloudflareList } from "./cloudflare-list-reader.js";
 import { HttpError } from "../../lib/http-error.js";
 import { normalizeDnsRecord } from "./dns-record-normalizer.js";
 
@@ -168,34 +169,9 @@ export class DnsRecordsService {
 
   async listRecords(zoneId) {
     assertCloudflareId(zoneId, "区域 ID");
-
-    const records = [];
-    let page = 1;
-    let totalPages = 1;
-
-    do {
-      const payload = await this.cloudflareClient.get(`zones/${zoneId}/dns_records`, {
-        page,
-        per_page: this.perPage,
-        order: "type",
-        direction: "asc",
-      });
-
-      if (!Array.isArray(payload.result)) {
-        throw new HttpError(502, "Cloudflare API 返回格式异常，请稍后重试。");
-      }
-
-      records.push(...payload.result.map(normalizeDnsRecord));
-
-      const reportedTotalPages = Number(payload.result_info?.total_pages);
-      totalPages =
-        Number.isFinite(reportedTotalPages) && reportedTotalPages >= page
-          ? reportedTotalPages
-          : page;
-      page += 1;
-    } while (page <= totalPages);
-
-    return records;
+    const records = await readCloudflareList({ client: this.cloudflareClient, path: `zones/${zoneId}/dns_records`,
+      perPage: this.perPage, query: { order: "type", direction: "asc" }, errorMessage: "Cloudflare DNS 记录读取失败" });
+    return records.map(normalizeDnsRecord);
   }
 
   async createRecord(zoneId, input) {
