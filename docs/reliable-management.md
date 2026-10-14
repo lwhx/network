@@ -6,6 +6,16 @@
 
 写入请求发出后仍可能在 Cloudflare 完成。切换页面不会撤销远端写入；返回原页面后通过刷新查看实际结果。
 
+## 完整响应超时与错误反馈
+
+Cloudflare 客户端在完整读完响应内容后才结束超时计时。网络响应先返回 HTTP 头、后续内容停滞时，读取会返回 504；若已经观察到 HTTP 错误状态，则保留该状态，HTTP 5xx 的写入仍视为结果未确认。适用 JSON、文本、原始响应、Multipart 和只读 GraphQL 查询。原始响应在客户端完整缓冲后返回，保留当前调用方使用的状态、头部和字节内容；不提供提前返回的网络流。
+
+写入结果未确认会提示先核查远端配置，不自动重试。非服务端错误的明确 `success:false` 拒绝响应继续作为失败处理；Multipart 成功必须包含 `success:true`。异常 Multipart 2xx 失败统一返回 502，防止页面误报成功。统计 GraphQL 必须返回有效 `data` 对象且没有错误；缺失或异常响应不再当成空统计。
+
+DNS 工具栏新增“刷新 DNS 记录”，加载时禁用，超时结束后可再次读取。复用原有账号、域名及请求版本保护；当前域名的批量结果会保留，刷新不会重试任何写入。
+
+参考 [Cloudflare GraphQL 错误响应](https://developers.cloudflare.com/analytics/graphql-api/errors/) 与 [Node.js fetch](https://nodejs.org/docs/latest-v24.x/api/globals.html#fetch)。验证使用本地 HTTP 服务先发送部分响应内容，再暂停发送，覆盖读取超时、写入不确定性、批量停止、手动刷新及移动端布局。
+
 ## 批量 DNS
 
 添加和删除在开始前校验所有输入，单次最多 100 条。输入无效时整批不发送写入。操作逐条执行，每条显示以下结果：

@@ -65,6 +65,10 @@ RATE_LIMIT_WINDOW_MS=900000
 
 不要再设置 `USER`、`PASSWORD`、`AUTH`、`EMAIL1`、`CF_API1` 等敏感环境变量。它们已经不被应用读取。
 
+`CLOUDFLARE_REQUEST_TIMEOUT_MS` 默认 15000 毫秒，作用于每一次 Cloudflare 请求，从建立请求到完整读取响应内容；收到响应头后仍会计时。JSON、文本、Workers 上传、KV/R2 原始响应和统计查询使用同一超时边界，避免响应内容停滞导致页面一直加载。它不是整次批量任务的总时限；大文件上传或慢连接可按实际情况调整。
+
+读取超时可手动刷新。写入超时、连接中断、服务端错误或异常成功响应会提示“写入结果未确认”，请先核查 Cloudflare 实际结果再决定是否重新提交。已收到明确 HTTP 4xx 拒绝时保留原错误状态；面板不会自动重试 Cloudflare 请求。DNS 页面提供“刷新 DNS 记录”，刷新不会清除当前账号、当前域名的批量结果。
+
 ## docker compose
 
 ```yaml

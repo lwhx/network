@@ -5,6 +5,20 @@ import { HttpError } from "../../lib/http-error.js";
 const missingCredentialMessage =
   "缺少 Cloudflare 凭据。请先完成首次初始化，并在面板中保存 Cloudflare 登录邮箱和 Global API Key。";
 
+function upstreamMessage(errors, fallbackMessage) {
+  if (!Array.isArray(errors)) return fallbackMessage;
+  return errors.map(item => typeof item?.message === "string" ? item.message : "")
+    .filter(Boolean).join("；") || fallbackMessage;
+}
+
+function responseError(response, message, { write = false, rejected = false } = {}) {
+  const unknown = write && (response.status >= 500 || (response.ok && !rejected));
+  const error = new HttpError(response.ok ? 502 : response.status,
+    unknown ? `${message}；写入结果未确认，请先核查远端配置。` : message);
+  error.remoteOutcomeUnknown = unknown;
+  return error;
+}
+
 export class CloudflareClient {
   constructor({ apiBaseUrl, email, globalApiKey, requestTimeoutMs, fetchImpl = fetch }) {
     this.apiBaseUrl = apiBaseUrl.replace(/\/+$/, "");
@@ -92,24 +106,17 @@ export class CloudflareClient {
     });
 
     if (!response.ok) {
-      const error = new HttpError(
-        response.status,
-        await this.readErrorMessage(response, `Cloudflare API 请求失败 (${response.status})`)
-      );
-      error.remoteOutcomeUnknown = response.status >= 500;
-      throw error;
+      throw responseError(response,
+        await this.readErrorMessage(response, `Cloudflare API 请求失败 (${response.status})`),
+        { write: true });
     }
 
     const payload = await response.json().catch(() => null);
 
     if (payload?.success === false) {
-      const cloudflareMessage =
-        payload.errors
-          ?.map((item) => item.message)
-          .filter(Boolean)
-          .join("；") || `Cloudflare API 请求失败 (${response.status})`;
-
-      throw new HttpError(response.ok ? 502 : response.status, cloudflareMessage);
+      throw responseError(response,
+        upstreamMessage(payload.errors, `Cloudflare API 请求失败 (${response.status})`),
+        { write: true, rejected: true });
     }
     if (response.status === 204 && !payload) return { success: true };
     if (!payload || payload.success !== true) {
@@ -154,14 +161,10 @@ export class CloudflareClient {
     });
     const payload = await response.json().catch(() => null);
 
-    if (!response.ok || !payload?.success) {
-      const cloudflareMessage =
-        payload?.errors
-          ?.map((item) => item.message)
-          .filter(Boolean)
-          .join("；") || `Cloudflare API 请求失败 (${response.status})`;
-
-      throw new HttpError(response.status, cloudflareMessage);
+    if (!response.ok || payload?.success !== true) {
+      throw responseError(response,
+        upstreamMessage(payload?.errors, `Cloudflare API 请求失败 (${response.status})`),
+        { write: true, rejected: payload?.success === false });
     }
 
     return payload;
@@ -192,10 +195,9 @@ export class CloudflareClient {
     });
 
     if (!response.ok) {
-      throw new HttpError(
-        response.status,
-        await this.readErrorMessage(response, `Cloudflare API 请求失败 (${response.status})`)
-      );
+      throw responseError(response,
+        await this.readErrorMessage(response, `Cloudflare API 请求失败 (${response.status})`),
+        { write: !["GET", "HEAD"].includes(method) });
     }
 
     return response;
@@ -210,20 +212,17 @@ export class CloudflareClient {
     const response = await this.request(url, {
       method: "POST",
       body: { query, variables },
+      readOnly: true,
     });
     const payload = await response.json().catch(() => null);
 
-    if (!response.ok || payload?.errors?.length) {
-      const cloudflareMessage =
-        payload?.errors
-          ?.map((item) => item.message)
-          .filter(Boolean)
-          .join("；") || `Cloudflare GraphQL 请求失败 (${response.status})`;
-
-      throw new HttpError(response.ok ? 502 : response.status, cloudflareMessage);
+    if (!response.ok || (payload?.errors != null && (!Array.isArray(payload.errors) || payload.errors.length > 0)) ||
+        !payload?.data || typeof payload.data !== "object" || Array.isArray(payload.data)) {
+      throw responseError(response,
+        upstreamMessage(payload?.errors, `Cloudflare GraphQL 请求失败 (${response.status})`));
     }
 
-    return payload?.data || {};
+    return payload.data;
   }
 
   async send(method, path, { searchParams = {}, body } = {}) {
@@ -241,16 +240,9 @@ export class CloudflareClient {
     }
 
     if (!response.ok || payload?.success !== true) {
-      const cloudflareMessage =
-        (Array.isArray(payload?.errors)
-          ? payload.errors.map((item) => item?.message).filter(Boolean).join("；")
-          : "") || `Cloudflare API 请求失败 (${response.status})`;
-
-      const error = new HttpError(response.ok ? 502 : response.status, cloudflareMessage);
-      error.remoteOutcomeUnknown =
-        !["GET", "HEAD"].includes(method) &&
-        (response.status >= 500 || (response.ok && payload?.success !== false));
-      throw error;
+      throw responseError(response,
+        upstreamMessage(payload?.errors, `Cloudflare API 请求失败 (${response.status})`),
+        { write: !["GET", "HEAD"].includes(method), rejected: payload?.success === false });
     }
 
     return payload;
@@ -274,24 +266,17 @@ export class CloudflareClient {
       .json()
       .catch(() => null);
 
-    if (payload?.errors?.length) {
-      const cloudflareMessage = payload.errors
-        .map((item) => item.message)
-        .filter(Boolean)
-        .join("；");
-
-      if (cloudflareMessage) {
-        return cloudflareMessage;
-      }
-    }
+    const cloudflareMessage = upstreamMessage(payload?.errors, "");
+    if (cloudflareMessage) return cloudflareMessage;
 
     const text = await response.text().catch(() => "");
     return text.trim() || fallbackMessage;
   }
 
-  async request(url, { method = "GET", body, headers = {}, serializeJson = true } = {}) {
+  async request(url, { method = "GET", body, headers = {}, serializeJson = true, readOnly = false } = {}) {
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), this.requestTimeoutMs);
+    let response;
 
     try {
       const credentials = this.getCredentials();
@@ -315,16 +300,32 @@ export class CloudflareClient {
         requestOptions.body = serializeJson ? JSON.stringify(body) : body;
       }
 
-      return await this.fetchImpl(url, requestOptions);
+      response = await this.fetchImpl(url, requestOptions);
+      // fetch resolves at headers. Keep the deadline active until the body is
+      // complete, including raw/text responses consumed by downstream services.
+      const bytes = await response.arrayBuffer();
+      return new Response(response.body === null ? null : bytes, {
+        status: response.status, statusText: response.statusText, headers: response.headers,
+      });
     } catch (cause) {
+      const timedOut = abortController.signal.aborted || cause.name === "AbortError";
+      if (response && !response.ok) {
+        // An observed HTTP rejection remains definite even if its error detail
+        // cannot be read. Server errors still cannot prove a write was rejected.
+        throw responseError(response, `Cloudflare API 请求失败 (${response.status})`, {
+          write: !readOnly && !["GET", "HEAD"].includes(method),
+        });
+      }
       const error = new HttpError(
-        cause.name === "AbortError" ? 504 : 502,
-        cause.name === "AbortError"
+        timedOut ? 504 : 502,
+        !readOnly && !["GET", "HEAD"].includes(method)
+          ? `${timedOut ? "Cloudflare API 请求超时" : "Cloudflare API 连接中断"}，写入结果未确认，请先核查远端配置。`
+          : timedOut
           ? "Cloudflare API 请求超时，请稍后重试。"
           : "无法连接 Cloudflare API，请检查网络或 API 地址。"
       );
       // A transport failure cannot prove that a remote write was rejected.
-      error.remoteOutcomeUnknown = !["GET", "HEAD"].includes(method);
+      error.remoteOutcomeUnknown = !readOnly && !["GET", "HEAD"].includes(method);
       throw error;
     } finally {
       clearTimeout(timeout);
