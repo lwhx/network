@@ -3,10 +3,16 @@ import { state } from "../state.js";
 import { beginScopedRequest, captureRequestContext } from "../request-scope.js";
 
 function historyQuery() {
+  const time = (value) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : value || "";
   return {
     limit: state.operationHistoryLimit,
     module: state.operationHistoryModule,
     status: state.operationHistoryStatus,
+    accountId: state.operationHistoryAccountId,
+    zoneId: state.operationHistoryZoneId,
+    from: time(state.operationHistoryFrom),
+    to: time(state.operationHistoryTo),
+    offset: state.operationHistoryOffset,
   };
 }
 
@@ -15,7 +21,11 @@ function applyHistoryPayload(payload = {}) {
   state.operationHistoryFilters = {
     modules: Array.isArray(payload.filters?.modules) ? payload.filters.modules : [],
     statuses: Array.isArray(payload.filters?.statuses) ? payload.filters.statuses : [],
+    accounts: Array.isArray(payload.filters?.accounts) ? payload.filters.accounts : [],
+    zones: Array.isArray(payload.filters?.zones) ? payload.filters.zones : [],
   };
+  state.operationHistoryTotal = Number(payload.total) || 0;
+  state.operationHistoryFilteredTotal = Number(payload.filteredTotal ?? payload.total) || 0;
 }
 
 function readHistoryContext() {
@@ -67,12 +77,18 @@ export function createHistoryActions({ renderApp }) {
       state.operationHistoryStatus = value;
     } else if (field === "limit") {
       state.operationHistoryLimit = value;
+    } else if (["accountId", "zoneId", "from", "to"].includes(field)) {
+      const keys = { accountId: "operationHistoryAccountId", zoneId: "operationHistoryZoneId", from: "operationHistoryFrom", to: "operationHistoryTo" };
+      state[keys[field]] = value;
+      if (field === "accountId") state.operationHistoryZoneId = "";
     }
+    state.operationHistoryOffset = 0;
 
     await loadOperationHistory();
   }
 
   async function clearOperationHistoryAction() {
+    if (typeof window !== "undefined" && window.confirm && !window.confirm("确定清空所有账号的操作历史吗？加速任务和配置快照会保留。")) return;
     state.operationHistoryLoading = true;
     state.operationHistoryNotice = "";
     renderApp();
@@ -84,6 +100,7 @@ export function createHistoryActions({ renderApp }) {
       if (!requestScope.isCurrent()) {
         return;
       }
+      state.operationHistoryOffset = 0;
       await loadOperationHistory(`已清空 ${result.deleted || 0} 条操作记录`);
     } catch (error) {
       if (!requestScope.isCurrent()) {
@@ -96,6 +113,15 @@ export function createHistoryActions({ renderApp }) {
   }
 
   return {
+    previousHistoryPage: async () => {
+      state.operationHistoryOffset = Math.max(0, state.operationHistoryOffset - Number(state.operationHistoryLimit));
+      await loadOperationHistory();
+    },
+    nextHistoryPage: async () => {
+      if (state.operationHistoryOffset + state.operationHistory.length >= state.operationHistoryFilteredTotal) return;
+      state.operationHistoryOffset += Number(state.operationHistoryLimit);
+      await loadOperationHistory();
+    },
     changeOperationHistoryFilter,
     clearOperationHistory: clearOperationHistoryAction,
     ensureOperationHistoryLoaded,

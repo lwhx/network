@@ -9,6 +9,7 @@ import { createHistoryActions } from "./actions/history-actions.js";
 import { createNoticeActions } from "./actions/notice-actions.js";
 import { createSessionActions } from "./actions/session-actions.js";
 import { createSpeedActions } from "./actions/speed-actions.js";
+import { createSpeedTasksActions } from "./actions/speed-tasks-actions.js";
 import { createWorkersActions } from "./actions/workers-actions.js";
 import { createZoneSettingsActions } from "./actions/zone-settings-actions.js";
 import { backToDomains, routeToZoneSection, updateRoute } from "./router.js";
@@ -22,7 +23,8 @@ export function createActions({ renderApp }) {
   const developerResourcesActions = createDeveloperResourcesActions({ renderApp });
   const dnsActions = createDnsActions({ renderApp });
   const historyActions = createHistoryActions({ renderApp });
-  const speedActions = createSpeedActions({ renderApp });
+  const speedTasksActions = createSpeedTasksActions({ renderApp });
+  const speedActions = createSpeedActions({ renderApp, onTaskChange: speedTasksActions.ensureSpeedTasksLoaded });
   const workersActions = createWorkersActions({ renderApp });
   const zoneSettingsActions = createZoneSettingsActions({ renderApp });
 
@@ -92,6 +94,7 @@ export function createActions({ renderApp }) {
     await developerResourcesActions.ensureDeveloperResourcesLoaded();
     await historyActions.ensureOperationHistoryLoaded();
     await workersActions.ensureWorkersLoaded();
+    await speedTasksActions.ensureSpeedTasksLoaded();
   }
 
   async function refreshZoneSettings() {
@@ -108,6 +111,7 @@ export function createActions({ renderApp }) {
     await developerResourcesActions.ensureDeveloperResourcesLoaded();
     await historyActions.ensureOperationHistoryLoaded();
     await workersActions.ensureWorkersLoaded();
+    await speedTasksActions.ensureSpeedTasksLoaded();
   }
 
   return {
@@ -121,6 +125,7 @@ export function createActions({ renderApp }) {
     ...historyActions,
     ...sessionActions,
     ...speedActions,
+    ...speedTasksActions,
     ...workersActions,
     ...zoneSettingsActions,
     backToDomains: () => {

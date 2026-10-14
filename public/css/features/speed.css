@@ -796,3 +796,16 @@
     text-align: left;
   }
 }
+.speed-task-panel { margin-top: 18px; padding: 16px; min-width: 0; }
+.speed-task-heading, .speed-task-row, .speed-task-step, .speed-task-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.speed-task-heading { flex-wrap: wrap; margin-bottom: 12px; }
+.speed-task-heading p, .speed-task-row span, .speed-task-detail p { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.speed-task-list { display: grid; }
+.speed-task-row { border-bottom: 1px solid var(--line); padding: 12px 0; flex-wrap: wrap; }
+.speed-task-row strong, .speed-task-row div span { display: block; overflow-wrap: anywhere; }
+.speed-task-row > div { flex: 1 1 180px; min-width: 0; }
+.speed-task-status { font-size: 13px; }
+.speed-task-status.warning { color: #9a3412; }
+.speed-task-detail { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-top: 14px; }
+.speed-task-step { flex-wrap: wrap; border-bottom: 1px solid var(--line); padding: 10px 0; font-size: 13px; }
+.speed-task-actions { justify-content: flex-start; flex-wrap: wrap; margin-top: 12px; }

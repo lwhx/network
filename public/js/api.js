@@ -55,7 +55,9 @@ async function readJson(response, fallbackMessage) {
   const payload = await response.json();
 
   if (!response.ok) {
-    throw new Error(payload.error || fallbackMessage);
+    const error = new Error(payload.error || fallbackMessage);
+    if (typeof payload.taskId === "string") error.taskId = payload.taskId;
+    throw error;
   }
 
   return payload;
@@ -899,6 +901,9 @@ export async function fetchOperationHistory(options = {}) {
   if (options.limit) {
     params.set("limit", String(options.limit));
   }
+  for (const key of ["accountId", "zoneId", "from", "to", "offset"]) {
+    if (options[key] !== undefined && options[key] !== null && options[key] !== "") params.set(key, String(options[key]));
+  }
 
   const suffix = params.toString() ? `?${params.toString()}` : "";
   const response = await apiFetch(`/api/operation-history${suffix}`);
@@ -913,6 +918,26 @@ export async function clearOperationHistory() {
 
   return payload.history;
 }
+
+export async function fetchSpeedTasks(options = {}) {
+  const response = await apiFetch("/api/speed-tasks", options);
+  return (await readJson(response, "读取加速任务失败")).tasks;
+}
+
+export async function fetchSpeedTask(id, options = {}) {
+  const response = await apiFetch(`/api/speed-tasks/${encodeURIComponent(id)}`, options);
+  return (await readJson(response, "检查加速任务失败")).task;
+}
+
+async function updateSpeedTask(id, action) {
+  const response = await apiFetch(`/api/speed-tasks/${encodeURIComponent(id)}/${action}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmation: "yes" }),
+  });
+  return (await readJson(response, "处理加速任务失败")).task;
+}
+
+export const recoverSpeedTask = (id) => updateSpeedTask(id, "recover");
+export const resolveSpeedTask = (id) => updateSpeedTask(id, "resolve");
 
 
 export async function fetchLoginSettingsSecret(body) {

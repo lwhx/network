@@ -11,10 +11,10 @@ export class SpeedDeployController {
       const deployment = await this.speedDeployService.deploy(params.zoneId, body);
       return { statusCode: 200, body: { deployment } };
     } catch (error) {
-      if (!error.rollback) throw error;
+      if (!error.rollback && !error.taskId) throw error;
       return {
         statusCode: error.statusCode || 502,
-        body: { error: error.message, rollback: error.rollback },
+        body: { error: error.message, ...(error.rollback ? { rollback: error.rollback } : {}), ...(error.taskId ? { taskId: error.taskId } : {}) },
       };
     }
   };
@@ -25,10 +25,12 @@ export class SpeedDeployController {
   };
 
   delete = async ({ params }) => {
-    const result = await this.speedDeployService.deleteManagedDomain(
-      params.zoneId,
-      params.accessDomain
-    );
-    return { statusCode: 200, body: result };
+    try {
+      const result = await this.speedDeployService.deleteManagedDomain(params.zoneId, params.accessDomain);
+      return { statusCode: 200, body: result };
+    } catch (error) {
+      if (!error.summary) throw error;
+      return { statusCode: error.statusCode || 502, body: { error: error.message, summary: error.summary, taskId: error.taskId } };
+    }
   };
 }

@@ -129,6 +129,13 @@ export const state = {
   speedNotice: "",
   speedForm: { ...defaultSpeedForm },
   speedAcceleratedDomains: [],
+  speedTasks: [],
+  speedTasksLoading: false,
+  speedTasksNotice: "",
+  speedTaskDetailId: "",
+  speedTaskDetail: null,
+  speedTaskDetailLoading: false,
+  speedTaskActionId: "",
   automationZoneId: "",
   automationPreset: "",
   automationState: null,
@@ -194,12 +201,21 @@ export const state = {
   operationHistoryFilters: {
     modules: [],
     statuses: [],
+    accounts: [],
+    zones: [],
   },
   operationHistoryLoading: false,
   operationHistoryNotice: "",
   operationHistoryModule: "",
   operationHistoryStatus: "",
   operationHistoryLimit: "80",
+  operationHistoryAccountId: "",
+  operationHistoryZoneId: "",
+  operationHistoryFrom: "",
+  operationHistoryTo: "",
+  operationHistoryOffset: 0,
+  operationHistoryTotal: 0,
+  operationHistoryFilteredTotal: 0,
 };
 
 export function resetSessionState() {
@@ -324,6 +340,11 @@ export function resetCloudflareAccountData({ preserveAccountManager = false } = 
 
 export function resetPendingResourceState() {
   resetAccountManagerState();
+  state.speedTasksLoading = false;
+  state.speedTaskDetailLoading = false;
+  state.speedTaskActionId = "";
+  state.speedTaskDetailId = "";
+  state.speedTaskDetail = null;
   const booleanFlags = ["loadingAnalytics", "loadingPageRules", "loadingSslSettings", "loadingCertificates", "loadingDns", "loadingCacheSettings", "loadingFirewallRules",
     "addingDomain", "savingDns", "savingDnsBulk", "deletingDnsBulk", "savingCacheSettings", "savingSslSettings", "savingCertificate", "purgingCache", "savingFirewallRule", "savingRulesetRule", "savingPageRule",
     "speedDeploying", "speedDomainsLoading", "automationLoading", "automationApplying", "workersLoading", "workersLoadingDetail", "workersSaving", "workersRoutesLoading", "developerResourceDetailLoading", "developerResourceLoading", "developerResourceSaving", "operationHistoryLoading"];
@@ -372,6 +393,13 @@ export function resetSpeedState() {
   state.speedDomainsOpen = false;
   state.speedDomainDeleteId = "";
   state.speedAcceleratedDomains = [];
+  state.speedTasks = [];
+  state.speedTasksLoading = false;
+  state.speedTasksNotice = "";
+  state.speedTaskDetailId = "";
+  state.speedTaskDetail = null;
+  state.speedTaskDetailLoading = false;
+  state.speedTaskActionId = "";
 }
 
 export function resetAutomationState() {
@@ -449,10 +477,19 @@ export function resetOperationHistoryState() {
   state.operationHistoryFilters = {
     modules: [],
     statuses: [],
+    accounts: [],
+    zones: [],
   };
   state.operationHistoryLoading = false;
   state.operationHistoryNotice = "";
   state.operationHistoryModule = "";
   state.operationHistoryStatus = "";
   state.operationHistoryLimit = "80";
+  state.operationHistoryAccountId = "";
+  state.operationHistoryZoneId = "";
+  state.operationHistoryFrom = "";
+  state.operationHistoryTo = "";
+  state.operationHistoryOffset = 0;
+  state.operationHistoryTotal = 0;
+  state.operationHistoryFilteredTotal = 0;
 }
